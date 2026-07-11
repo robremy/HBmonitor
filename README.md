@@ -1,5 +1,13 @@
 # Xiaomi Smart Band 10 Heart Rate Alarm PWA
 
+## Screenshot
+
+<p align="center">
+  <img src="hbmonitor-screenshot.png"
+       alt="Xiaomi Smart Band 10 hartslag alarm PWA op een smartphone"
+       width="380">
+</p>
+
 Deze app is een statische PWA:
 
 - Geen Pydroid3-backend nodig tijdens gebruik
