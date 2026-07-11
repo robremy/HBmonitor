@@ -3,7 +3,7 @@
 ## Screenshot
 
 <p align="center">
-  <img src="hbmonitor-screenshot.png"
+  <img src="hbmonitor-screenshot.jpg"
        alt="Xiaomi Smart Band 10 hartslag alarm PWA op een smartphone"
        width="380">
 </p>
