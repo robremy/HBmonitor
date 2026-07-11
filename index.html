@@ -1,0 +1,1463 @@
+<!doctype html>
+<html lang="nl">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width,initial-scale=1">
+  <meta name="theme-color" content="#0b0b0b">
+  <meta name="mobile-web-app-capable" content="yes">
+  <meta name="apple-mobile-web-app-capable" content="yes">
+  <meta name="apple-mobile-web-app-status-bar-style" content="black">
+  <meta name="apple-mobile-web-app-title" content="HR Alarm">
+
+  <link rel="manifest" href="./manifest.webmanifest">
+  <link rel="icon" href="./icon-192.png">
+  <link rel="apple-touch-icon" href="./icon-192.png">
+
+  <title>Xiaomi Band Hartslag Alarm PWA</title>
+
+  <style>
+    body {
+      font-family: system-ui, Arial, sans-serif;
+      margin: 0;
+      padding: 18px;
+      background: #0b0b0b;
+      color: #f2f2f2;
+    }
+
+    .card {
+      background: #1b1b1b;
+      border: 1px solid #333;
+      border-radius: 14px;
+      padding: 16px;
+      margin-bottom: 14px;
+    }
+
+    h1 {
+      font-size: 22px;
+      margin: 0 0 12px 0;
+    }
+
+    .bpm {
+      font-size: 74px;
+      font-weight: 800;
+      line-height: 1;
+      margin: 10px 0;
+    }
+
+    .status {
+      font-size: 16px;
+      color: #bbb;
+      margin-top: 6px;
+    }
+
+    button {
+      font-size: 17px;
+      padding: 14px 14px;
+      border: 0;
+      border-radius: 12px;
+      margin: 6px 4px 6px 0;
+      background: #1e88e5;
+      color: white;
+      font-weight: 700;
+    }
+
+    button.red { background: #c62828; }
+    button.gray { background: #555; }
+    button.green { background: #2e7d32; }
+    button.orange { background: #ef6c00; }
+    button.purple { background: #6a1b9a; }
+
+    input {
+      font-size: 20px;
+      width: 95px;
+      padding: 8px;
+      border-radius: 8px;
+      border: 1px solid #555;
+      background: #111;
+      color: #fff;
+    }
+
+    label {
+      display: block;
+      margin: 10px 0;
+      font-size: 16px;
+    }
+
+    .alarm {
+      background: #4a0000;
+      border-color: #ff3333;
+    }
+
+    .ok { color: #44dd88; }
+    .warn { color: #ffcc33; }
+    .bad { color: #ff5555; }
+
+    pre {
+      white-space: pre-wrap;
+      font-size: 13px;
+      color: #ddd;
+      background: #111;
+      padding: 10px;
+      border-radius: 10px;
+      max-height: 240px;
+      overflow-y: auto;
+    }
+
+    canvas {
+      width: 100%;
+      height: 260px;
+      background: #101010;
+      border-radius: 12px;
+      border: 1px solid #333;
+      display: block;
+      margin-top: 10px;
+    }
+
+    .legend {
+      font-size: 14px;
+      color: #ccc;
+      margin-top: 8px;
+      line-height: 1.5;
+    }
+
+    .blue-dot {
+      color: #2196f3;
+      font-weight: bold;
+    }
+
+    .red-dot {
+      color: #f44336;
+      font-weight: bold;
+    }
+
+    .small {
+      font-size: 13px;
+      color: #aaa;
+      line-height: 1.45;
+      margin-top: 10px;
+    }
+  </style>
+</head>
+
+<body>
+  <div id="mainCard" class="card">
+    <h1>Xiaomi Smart Band 10 hartslag alarm PWA</h1>
+    <div id="bpm" class="bpm">--</div>
+    <div id="contact" class="status">Nog niet verbonden</div>
+    <div id="deviceName" class="status"></div>
+    <div id="lastDeviceInfo" class="status"></div>
+    <div id="wakeLockInfo" class="status"></div>
+    <div id="pwaInfo" class="status">PWA: initialiseren...</div>
+    <div id="dbInfo" class="status">IndexedDB: initialiseren...</div>
+    <div id="storageInfo" class="status">Opslag: controleren...</div>
+  </div>
+
+  <div class="card">
+    <button onclick="connectBand()">Verbinden</button>
+    <button class="orange" onclick="connectLastBand()">Gebruik laatst verbonden band</button>
+    <button class="gray" onclick="disconnectBand()">Verbreken</button>
+    <button id="alarmModeButton" class="green" onclick="toggleAlarmMode()">Alarm: tril</button>
+    <button class="red" onclick="testAlarm()">Test alarm</button>
+    <button class="gray" onclick="stopVibration()">Stop trillen</button>
+    <button id="installBtn" class="purple" onclick="installPwa()" style="display:none;">Installeer app</button>
+    <button class="purple" onclick="requestPersistentStorage()">Opslag permanent maken</button>
+
+    <label>
+      Alarmgrens bpm:
+      <input id="limit" type="number" value="76" min="30" max="220" oninput="drawChart()">
+    </label>
+
+    <label>
+      Alarm na aantal seconden boven grens:
+      <input id="secondsHigh" type="number" value="10" min="1" max="300">
+    </label>
+
+    <label>
+      Cooldown tussen alarmen:
+      <input id="cooldown" type="number" value="30" min="5" max="600">
+      seconden
+    </label>
+
+    <div id="alarmStatus" class="status">Alarmstatus: wacht op hartslag</div>
+
+    <div class="small">
+      Deze PWA werkt zonder Pydroid-backend. Chrome doet Web Bluetooth, alarm, grafiek en opslag zelf.
+      Metingen worden lokaal opgeslagen in IndexedDB. Default alarmgrens: 76 bpm. Alarm gaat af bij hoger dan 76, dus vanaf 77 bpm.
+    </div>
+  </div>
+
+  <div class="card">
+    <b>IndexedDB opvragen</b><br>
+    <button class="purple" onclick="loadTodayFromIndexedDb()">Laad vandaag uit IndexedDB</button>
+    <button class="purple" onclick="showStatsToday()">Stats vandaag</button>
+    <button class="purple" onclick="downloadCsvToday()">Download CSV vandaag</button>
+    <button class="purple" onclick="showDays()">Toon dagen</button>
+    <button class="red" onclick="deleteTodayConfirm()">Verwijder vandaag</button>
+    <pre id="queryOutput">Nog niets opgevraagd.</pre>
+  </div>
+
+  <div class="card">
+    <b>Log</b>
+    <pre id="log"></pre>
+  </div>
+
+  <div class="card">
+    <b>Hartslaggrafiek vandaag</b>
+    <canvas id="hrChart"></canvas>
+    <div class="legend">
+      <span class="blue-dot">●</span> blauw = normaal /
+      <span class="red-dot">●</span> rood = boven alarmwaarde
+      <br>
+      <span id="chartInfo">Nog geen metingen.</span>
+    </div>
+  </div>
+
+<script>
+const HR_SERVICE = "0000180d-0000-1000-8000-00805f9b34fb";
+const HR_MEASUREMENT = "00002a37-0000-1000-8000-00805f9b34fb";
+
+const STORAGE_LAST_NAME = "xiaomi_band10_last_device_name_pwa_v1";
+
+const DB_NAME = "xiaomi_band10_heart_rate_db";
+const DB_VERSION = 1;
+const STORE_NAME = "samples";
+
+let db = null;
+
+let device = null;
+let server = null;
+let characteristic = null;
+
+let aboveSince = null;
+let lastAlarm = 0;
+let screenWakeLock = null;
+
+let alarmMode = "vibrate";
+let audioCtx = null;
+
+let todaySamples = [];
+let currentDayKey = getDayKey(new Date());
+
+let saveCounter = 0;
+let deferredInstallPrompt = null;
+
+
+function getDayKey(d) {
+  return d.getFullYear() + "-" +
+    String(d.getMonth() + 1).padStart(2, "0") + "-" +
+    String(d.getDate()).padStart(2, "0");
+}
+
+
+function log(msg) {
+  const el = document.getElementById("log");
+  const line = new Date().toLocaleTimeString() + " | " + msg;
+  el.textContent = line + "\n" + el.textContent;
+}
+
+
+function setStatus(msg, cls = "") {
+  const el = document.getElementById("alarmStatus");
+  el.textContent = msg;
+  el.className = "status " + cls;
+}
+
+
+function setDbInfo(msg, cls = "") {
+  const el = document.getElementById("dbInfo");
+  el.textContent = "IndexedDB: " + msg;
+  el.className = "status " + cls;
+}
+
+
+function setPwaInfo(msg, cls = "") {
+  const el = document.getElementById("pwaInfo");
+  el.textContent = "PWA: " + msg;
+  el.className = "status " + cls;
+}
+
+
+function setStorageInfo(msg, cls = "") {
+  const el = document.getElementById("storageInfo");
+  el.textContent = "Opslag: " + msg;
+  el.className = "status " + cls;
+}
+
+
+function getLimit() {
+  return Number(document.getElementById("limit").value || 76);
+}
+
+
+function getSecondsHigh() {
+  return Number(document.getElementById("secondsHigh").value || 10);
+}
+
+
+function getCooldownMs() {
+  return Number(document.getElementById("cooldown").value || 30) * 1000;
+}
+
+
+// ============================================================
+// PWA INSTALL + SERVICE WORKER
+// ============================================================
+
+window.addEventListener("beforeinstallprompt", (event) => {
+  event.preventDefault();
+  deferredInstallPrompt = event;
+  document.getElementById("installBtn").style.display = "inline-block";
+  setPwaInfo("installatie beschikbaar", "ok");
+});
+
+
+window.addEventListener("appinstalled", () => {
+  deferredInstallPrompt = null;
+  document.getElementById("installBtn").style.display = "none";
+  setPwaInfo("geïnstalleerd", "ok");
+  log("PWA geïnstalleerd");
+});
+
+
+async function installPwa() {
+  if (!deferredInstallPrompt) {
+    alert("Gebruik Chrome-menu → App installeren of Toevoegen aan startscherm.");
+    return;
+  }
+
+  deferredInstallPrompt.prompt();
+  const choice = await deferredInstallPrompt.userChoice;
+
+  log("Installatiekeuze: " + choice.outcome);
+
+  deferredInstallPrompt = null;
+  document.getElementById("installBtn").style.display = "none";
+}
+
+
+async function registerServiceWorker() {
+  if (!("serviceWorker" in navigator)) {
+    setPwaInfo("service worker niet ondersteund", "warn");
+    return;
+  }
+
+  try {
+    const reg = await navigator.serviceWorker.register("./sw.js", {
+      scope: "./"
+    });
+
+    setPwaInfo("offline cache actief", "ok");
+    log("Service worker geregistreerd");
+
+    if (reg.waiting) {
+      log("Nieuwe versie wacht. Sluit en open app opnieuw voor update.");
+    }
+
+    reg.addEventListener("updatefound", () => {
+      log("Nieuwe service worker update gevonden");
+    });
+
+  } catch (e) {
+    setPwaInfo("service worker fout", "bad");
+    log("Service worker registratie FOUT: " + e);
+  }
+}
+
+
+// ============================================================
+// STORAGE PERSISTENCE
+// ============================================================
+
+async function updateStorageEstimate() {
+  try {
+    if (!navigator.storage || !navigator.storage.estimate) {
+      setStorageInfo("estimate niet ondersteund", "warn");
+      return;
+    }
+
+    const est = await navigator.storage.estimate();
+
+    const usedMb = est.usage ? Math.round(est.usage / 1024 / 1024 * 10) / 10 : 0;
+    const quotaMb = est.quota ? Math.round(est.quota / 1024 / 1024) : "?";
+
+    let persistedText = "";
+
+    if (navigator.storage.persisted) {
+      const persisted = await navigator.storage.persisted();
+      persistedText = persisted ? " | persistent" : " | niet persistent";
+    }
+
+    setStorageInfo(usedMb + " MB gebruikt / " + quotaMb + " MB quota" + persistedText, "ok");
+
+  } catch (e) {
+    setStorageInfo("estimate fout: " + e, "bad");
+  }
+}
+
+
+async function requestPersistentStorage() {
+  try {
+    if (!navigator.storage || !navigator.storage.persist) {
+      setStorageInfo("persistent storage niet ondersteund", "warn");
+      log("Persistent storage niet ondersteund");
+      return;
+    }
+
+    const granted = await navigator.storage.persist();
+
+    if (granted) {
+      setStorageInfo("persistent storage toegestaan", "ok");
+      log("Persistent storage toegestaan");
+    } else {
+      setStorageInfo("persistent storage niet toegestaan", "warn");
+      log("Persistent storage niet toegestaan door browser");
+    }
+
+    await updateStorageEstimate();
+
+  } catch (e) {
+    setStorageInfo("persistent storage fout: " + e, "bad");
+    log("Persistent storage FOUT: " + e);
+  }
+}
+
+
+// ============================================================
+// INDEXEDDB
+// ============================================================
+
+function openIndexedDb() {
+  return new Promise((resolve, reject) => {
+    if (!window.indexedDB) {
+      reject(new Error("IndexedDB wordt niet ondersteund door deze browser"));
+      return;
+    }
+
+    const req = indexedDB.open(DB_NAME, DB_VERSION);
+
+    req.onupgradeneeded = function(event) {
+      const database = event.target.result;
+
+      if (!database.objectStoreNames.contains(STORE_NAME)) {
+        const store = database.createObjectStore(STORE_NAME, {
+          keyPath: "id"
+        });
+
+        store.createIndex("date_key", "date_key", { unique: false });
+        store.createIndex("ts_ms", "ts_ms", { unique: false });
+        store.createIndex("device_name", "device_name", { unique: false });
+      }
+    };
+
+    req.onsuccess = function(event) {
+      db = event.target.result;
+
+      db.onversionchange = function() {
+        db.close();
+        alert("Nieuwe databaseversie beschikbaar. Sluit en open de app opnieuw.");
+      };
+
+      setDbInfo("klaar", "ok");
+      resolve(db);
+    };
+
+    req.onerror = function(event) {
+      reject(event.target.error);
+    };
+  });
+}
+
+
+function saveSampleIndexedDb(sample) {
+  return new Promise((resolve, reject) => {
+    if (!db) {
+      reject(new Error("IndexedDB is nog niet open"));
+      return;
+    }
+
+    const tx = db.transaction(STORE_NAME, "readwrite");
+    const store = tx.objectStore(STORE_NAME);
+
+    store.put(sample);
+
+    tx.oncomplete = function() {
+      resolve(true);
+    };
+
+    tx.onerror = function(event) {
+      reject(event.target.error);
+    };
+  });
+}
+
+
+function getSamplesByDate(dateKey) {
+  return new Promise((resolve, reject) => {
+    if (!db) {
+      reject(new Error("IndexedDB is nog niet open"));
+      return;
+    }
+
+    const tx = db.transaction(STORE_NAME, "readonly");
+    const store = tx.objectStore(STORE_NAME);
+    const index = store.index("date_key");
+    const req = index.getAll(IDBKeyRange.only(dateKey));
+
+    req.onsuccess = function() {
+      const rows = req.result || [];
+      rows.sort((a, b) => a.ts_ms - b.ts_ms);
+      resolve(rows);
+    };
+
+    req.onerror = function(event) {
+      reject(event.target.error);
+    };
+  });
+}
+
+
+function getAllSamples() {
+  return new Promise((resolve, reject) => {
+    if (!db) {
+      reject(new Error("IndexedDB is nog niet open"));
+      return;
+    }
+
+    const tx = db.transaction(STORE_NAME, "readonly");
+    const store = tx.objectStore(STORE_NAME);
+    const req = store.getAll();
+
+    req.onsuccess = function() {
+      resolve(req.result || []);
+    };
+
+    req.onerror = function(event) {
+      reject(event.target.error);
+    };
+  });
+}
+
+
+function deleteSamplesByDate(dateKey) {
+  return new Promise((resolve, reject) => {
+    if (!db) {
+      reject(new Error("IndexedDB is nog niet open"));
+      return;
+    }
+
+    const tx = db.transaction(STORE_NAME, "readwrite");
+    const store = tx.objectStore(STORE_NAME);
+    const index = store.index("date_key");
+    const req = index.openCursor(IDBKeyRange.only(dateKey));
+
+    let deleted = 0;
+
+    req.onsuccess = function(event) {
+      const cursor = event.target.result;
+
+      if (cursor) {
+        cursor.delete();
+        deleted += 1;
+        cursor.continue();
+      }
+    };
+
+    tx.oncomplete = function() {
+      resolve(deleted);
+    };
+
+    tx.onerror = function(event) {
+      reject(event.target.error);
+    };
+  });
+}
+
+
+function downsampleSamples(samples, maxPoints=4000) {
+  if (samples.length <= maxPoints) return samples;
+
+  const step = Math.max(1, Math.floor(samples.length / maxPoints));
+  const out = [];
+
+  for (let i = 0; i < samples.length; i += step) {
+    out.push(samples[i]);
+  }
+
+  if (out[out.length - 1] !== samples[samples.length - 1]) {
+    out.push(samples[samples.length - 1]);
+  }
+
+  return out;
+}
+
+
+function summarizeSamples(samples, dateKey) {
+  if (!samples || samples.length === 0) {
+    return {
+      date: dateKey,
+      samples: 0,
+      min_bpm: null,
+      max_bpm: null,
+      avg_bpm: null,
+      above_count: 0,
+      above_percentage: 0,
+      first_time: null,
+      last_time: null
+    };
+  }
+
+  const sorted = [...samples].sort((a, b) => a.ts_ms - b.ts_ms);
+  const bpms = sorted.map(s => s.bpm);
+  const aboveCount = sorted.filter(s => s.above_limit).length;
+  const sum = bpms.reduce((a, b) => a + b, 0);
+
+  return {
+    date: dateKey,
+    samples: sorted.length,
+    min_bpm: Math.min(...bpms),
+    max_bpm: Math.max(...bpms),
+    avg_bpm: Math.round((sum / sorted.length) * 10) / 10,
+    above_count: aboveCount,
+    above_percentage: Math.round((aboveCount / sorted.length * 100) * 100) / 100,
+    first_time: sorted[0].ts_local,
+    last_time: sorted[sorted.length - 1].ts_local
+  };
+}
+
+
+async function showDays() {
+  try {
+    const rows = await getAllSamples();
+    const groups = {};
+
+    for (const s of rows) {
+      if (!groups[s.date_key]) {
+        groups[s.date_key] = [];
+      }
+      groups[s.date_key].push(s);
+    }
+
+    const days = Object.keys(groups)
+      .sort()
+      .reverse()
+      .map(dateKey => summarizeSamples(groups[dateKey], dateKey));
+
+    document.getElementById("queryOutput").textContent =
+      JSON.stringify({ ok: true, days }, null, 2);
+
+    setDbInfo("dagen geladen", "ok");
+    await updateStorageEstimate();
+
+  } catch (e) {
+    document.getElementById("queryOutput").textContent = "Fout: " + e;
+    setDbInfo("dagen fout", "bad");
+  }
+}
+
+
+async function loadTodayFromIndexedDb() {
+  try {
+    const dateKey = getDayKey(new Date());
+    const rows = await getSamplesByDate(dateKey);
+
+    const sampled = downsampleSamples(rows, 4000);
+
+    todaySamples = sampled.map(s => ({
+      time: s.ts_ms,
+      label: s.time_label,
+      bpm: s.bpm,
+      alarm_limit: s.alarm_limit,
+      above_limit: s.above_limit
+    }));
+
+    drawChart();
+
+    document.getElementById("queryOutput").textContent =
+      JSON.stringify({
+        ok: true,
+        date: dateKey,
+        total_samples: rows.length,
+        returned_samples_for_graph: sampled.length
+      }, null, 2);
+
+    log("Vandaag geladen uit IndexedDB: " + rows.length + " metingen");
+    setDbInfo("vandaag geladen", "ok");
+    await updateStorageEstimate();
+
+  } catch (e) {
+    document.getElementById("queryOutput").textContent = "Fout: " + e;
+    setDbInfo("laden fout", "bad");
+  }
+}
+
+
+async function showStatsToday() {
+  try {
+    const dateKey = getDayKey(new Date());
+    const rows = await getSamplesByDate(dateKey);
+    const stats = summarizeSamples(rows, dateKey);
+
+    document.getElementById("queryOutput").textContent =
+      JSON.stringify({ ok: true, stats }, null, 2);
+
+    setDbInfo("stats geladen", "ok");
+    await updateStorageEstimate();
+
+  } catch (e) {
+    document.getElementById("queryOutput").textContent = "Fout: " + e;
+    setDbInfo("stats fout", "bad");
+  }
+}
+
+
+function csvEscape(value) {
+  if (value === null || value === undefined) return "";
+  const s = String(value);
+
+  if (s.includes(",") || s.includes('"') || s.includes("\n")) {
+    return '"' + s.replaceAll('"', '""') + '"';
+  }
+
+  return s;
+}
+
+
+async function downloadCsvToday() {
+  try {
+    const dateKey = getDayKey(new Date());
+    const rows = await getSamplesByDate(dateKey);
+
+    const headers = [
+      "id",
+      "ts_ms",
+      "ts_local",
+      "date_key",
+      "time_label",
+      "bpm",
+      "alarm_limit",
+      "above_limit",
+      "contact",
+      "device_name",
+      "alarm_mode"
+    ];
+
+    const lines = [];
+    lines.push(headers.join(","));
+
+    for (const r of rows) {
+      lines.push(headers.map(h => csvEscape(r[h])).join(","));
+    }
+
+    const csvText = lines.join("\n");
+    const blob = new Blob([csvText], { type: "text/csv;charset=utf-8" });
+    const url = URL.createObjectURL(blob);
+
+    const a = document.createElement("a");
+    a.href = url;
+    a.download = "heart_rate_" + dateKey + ".csv";
+    document.body.appendChild(a);
+    a.click();
+    document.body.removeChild(a);
+
+    URL.revokeObjectURL(url);
+
+    log("CSV gemaakt: " + rows.length + " metingen");
+    setDbInfo("CSV gemaakt", "ok");
+
+  } catch (e) {
+    document.getElementById("queryOutput").textContent = "CSV fout: " + e;
+    setDbInfo("CSV fout", "bad");
+  }
+}
+
+
+async function deleteTodayConfirm() {
+  const dateKey = getDayKey(new Date());
+
+  if (!confirm("Alle metingen van vandaag verwijderen uit IndexedDB?")) {
+    return;
+  }
+
+  try {
+    const deleted = await deleteSamplesByDate(dateKey);
+
+    todaySamples = [];
+    drawChart();
+
+    document.getElementById("queryOutput").textContent =
+      JSON.stringify({ ok: true, date: dateKey, deleted }, null, 2);
+
+    log("Verwijderd uit IndexedDB: " + deleted + " metingen van vandaag");
+    setDbInfo("vandaag verwijderd", "ok");
+    await updateStorageEstimate();
+
+  } catch (e) {
+    document.getElementById("queryOutput").textContent = "Delete fout: " + e;
+    setDbInfo("delete fout", "bad");
+  }
+}
+
+
+// ============================================================
+// BLUETOOTH + DEVICE MEMORY
+// ============================================================
+
+function saveLastDevice(dev) {
+  try {
+    if (!dev) return;
+
+    const name = dev.name || "onbekend";
+    localStorage.setItem(STORAGE_LAST_NAME, name);
+
+    updateLastDeviceInfo();
+    log("Band onthouden: " + name);
+
+  } catch (e) {
+    log("Kon bandgegevens niet opslaan: " + e);
+  }
+}
+
+
+function updateLastDeviceInfo() {
+  const name = localStorage.getItem(STORAGE_LAST_NAME);
+  const el = document.getElementById("lastDeviceInfo");
+
+  if (name) {
+    el.textContent = "Laatst gebruikt: " + name;
+  } else {
+    el.textContent = "Nog geen laatst gebruikte band opgeslagen";
+  }
+}
+
+
+function toggleAlarmMode() {
+  const btn = document.getElementById("alarmModeButton");
+
+  if (alarmMode === "vibrate") {
+    alarmMode = "audio";
+    btn.textContent = "Alarm: audio";
+    btn.className = "red";
+    log("Alarmmodus gewijzigd naar audio");
+  } else {
+    alarmMode = "vibrate";
+    btn.textContent = "Alarm: tril";
+    btn.className = "green";
+    log("Alarmmodus gewijzigd naar tril");
+  }
+}
+
+
+async function requestScreenWakeLock() {
+  const el = document.getElementById("wakeLockInfo");
+
+  try {
+    if (!("wakeLock" in navigator)) {
+      el.textContent = "Browser screen WakeLock niet ondersteund";
+      log("Browser screen WakeLock niet ondersteund");
+      return;
+    }
+
+    if (screenWakeLock !== null) {
+      el.textContent = "Browser screen WakeLock actief";
+      return;
+    }
+
+    screenWakeLock = await navigator.wakeLock.request("screen");
+
+    screenWakeLock.addEventListener("release", () => {
+      screenWakeLock = null;
+      document.getElementById("wakeLockInfo").textContent =
+        "Browser screen WakeLock vrijgegeven";
+      log("Browser screen WakeLock vrijgegeven");
+    });
+
+    el.textContent = "Browser screen WakeLock actief";
+    log("Browser screen WakeLock actief");
+
+  } catch (e) {
+    el.textContent = "Browser screen WakeLock niet actief";
+    log("Browser screen WakeLock fout: " + e);
+  }
+}
+
+
+document.addEventListener("visibilitychange", () => {
+  if (document.visibilityState === "visible") {
+    requestScreenWakeLock();
+  }
+});
+
+
+async function connectBand() {
+  try {
+    await requestScreenWakeLock();
+
+    if (!navigator.bluetooth) {
+      alert("Web Bluetooth wordt niet ondersteund. Gebruik Chrome op Android.");
+      return;
+    }
+
+    log("Bluetooth-kiezer openen...");
+    setStatus("Kies je Xiaomi-band in de Bluetooth-lijst...", "warn");
+
+    device = await navigator.bluetooth.requestDevice({
+      acceptAllDevices: true,
+      optionalServices: [HR_SERVICE]
+    });
+
+    await connectToDevice(device, true);
+
+  } catch (e) {
+    log("Fout bij verbinden: " + e);
+    setStatus("Fout bij verbinden. Sluit nRF Connect af en probeer opnieuw.", "bad");
+  }
+}
+
+
+async function connectLastBand() {
+  try {
+    await requestScreenWakeLock();
+
+    if (!navigator.bluetooth) {
+      alert("Web Bluetooth wordt niet ondersteund. Gebruik Chrome op Android.");
+      return;
+    }
+
+    const lastName = localStorage.getItem(STORAGE_LAST_NAME);
+
+    if (!lastName) {
+      log("Geen laatst verbonden band opgeslagen. Gebruik eerst Verbinden.");
+      setStatus("Geen opgeslagen band. Gebruik eerst Verbinden.", "warn");
+      return;
+    }
+
+    log("Laatst gebruikte band: " + lastName);
+    log("Bluetooth-kiezer openen met filter...");
+
+    setStatus("Kies je Xiaomi Smart Band opnieuw.", "warn");
+
+    try {
+      device = await navigator.bluetooth.requestDevice({
+        filters: [
+          { name: lastName },
+          { namePrefix: "Xiaomi Smart Band" },
+          { namePrefix: "Xiaomi" },
+          { services: [HR_SERVICE] }
+        ],
+        optionalServices: [HR_SERVICE]
+      });
+    } catch (e1) {
+      log("Gefilterde keuze mislukt/geannuleerd: " + e1);
+      log("Fallback: algemene Bluetooth-kiezer openen...");
+
+      device = await navigator.bluetooth.requestDevice({
+        acceptAllDevices: true,
+        optionalServices: [HR_SERVICE]
+      });
+    }
+
+    await connectToDevice(device, true);
+
+  } catch (e) {
+    log("Gebruik laatst verbonden band mislukt: " + e);
+    setStatus("Kiezen geannuleerd of mislukt.", "warn");
+  }
+}
+
+
+async function autoConnectLastBandOnStartup() {
+  await requestScreenWakeLock();
+  updateLastDeviceInfo();
+
+  const lastName = localStorage.getItem(STORAGE_LAST_NAME);
+
+  if (!lastName) {
+    log("Geen laatst verbonden band bekend. Eerste keer: druk op Verbinden.");
+    setStatus("Druk op Verbinden.", "warn");
+    return;
+  }
+
+  log("Laatst gebruikte band bekend: " + lastName);
+  log("Druk op Gebruik laatst verbonden band en kies de band opnieuw.");
+  setStatus("Druk op Gebruik laatst verbonden band.", "warn");
+}
+
+
+async function connectToDevice(dev, storeDevice) {
+  if (!dev) {
+    throw new Error("Geen device opgegeven");
+  }
+
+  document.getElementById("deviceName").textContent =
+    "Device: " + (dev.name || "onbekend");
+
+  dev.addEventListener("gattserverdisconnected", onDisconnected);
+
+  log("Verbinden met " + (dev.name || "onbekend") + "...");
+  server = await dev.gatt.connect();
+
+  log("Heart Rate Service zoeken...");
+  const service = await server.getPrimaryService(HR_SERVICE);
+
+  log("Heart Rate Measurement characteristic zoeken...");
+  characteristic = await service.getCharacteristic(HR_MEASUREMENT);
+
+  characteristic.addEventListener("characteristicvaluechanged", onHeartRate);
+  await characteristic.startNotifications();
+
+  if (storeDevice) {
+    saveLastDevice(dev);
+  } else {
+    updateLastDeviceInfo();
+  }
+
+  log("Live hartslag gestart");
+  setStatus("Verbonden. Wacht op hartslag...", "ok");
+}
+
+
+function disconnectBand() {
+  try {
+    stopVibration();
+
+    if (characteristic) {
+      characteristic.stopNotifications().catch(() => {});
+    }
+
+    if (device && device.gatt && device.gatt.connected) {
+      device.gatt.disconnect();
+    }
+
+    log("Verbinding handmatig verbroken");
+
+  } catch (e) {
+    log("Fout bij verbreken: " + e);
+  }
+}
+
+
+function onDisconnected() {
+  stopVibration();
+  log("Bluetooth verbinding verbroken");
+  document.getElementById("contact").textContent = "Verbinding verbroken";
+  setStatus("Verbinding verbroken", "bad");
+  aboveSince = null;
+}
+
+
+function parseHeartRate(value) {
+  const flags = value.getUint8(0);
+  let index = 1;
+
+  const hrIs16Bit = (flags & 0x01) !== 0;
+  let bpm;
+
+  if (hrIs16Bit) {
+    bpm = value.getUint16(index, true);
+    index += 2;
+  } else {
+    bpm = value.getUint8(index);
+    index += 1;
+  }
+
+  const contactSupported = (flags & 0x04) !== 0;
+  const contactDetected = (flags & 0x02) !== 0;
+
+  let contact = "contact onbekend";
+
+  if (contactSupported) {
+    contact = contactDetected ? "contact gedetecteerd" : "geen sensorcontact";
+  }
+
+  return { bpm, contact };
+}
+
+
+async function onHeartRate(event) {
+  checkNewDay();
+
+  const value = event.target.value;
+  const parsed = parseHeartRate(value);
+
+  document.getElementById("bpm").textContent = parsed.bpm;
+  document.getElementById("contact").textContent = parsed.contact;
+
+  const now = new Date();
+  const limit = getLimit();
+  const above = parsed.bpm > limit;
+  const devName = device ? (device.name || "onbekend") : "onbekend";
+
+  const sample = {
+    id: String(now.getTime()) + "_" + Math.random().toString(36).slice(2),
+    ts_ms: now.getTime(),
+    ts_local: now.toISOString(),
+    date_key: getDayKey(now),
+    time_label: now.toLocaleTimeString(),
+    bpm: parsed.bpm,
+    alarm_limit: limit,
+    above_limit: above ? 1 : 0,
+    contact: parsed.contact,
+    device_name: devName,
+    alarm_mode: alarmMode
+  };
+
+  todaySamples.push({
+    time: sample.ts_ms,
+    label: sample.time_label,
+    bpm: sample.bpm,
+    alarm_limit: sample.alarm_limit,
+    above_limit: sample.above_limit
+  });
+
+  if (todaySamples.length > 100000) {
+    todaySamples = todaySamples.slice(-100000);
+  }
+
+  const shortContact = parsed.contact.includes("gedetecteerd") ? "contact" : parsed.contact;
+  log(parsed.bpm + " bpm | " + shortContact);
+
+  saveSampleIndexedDb(sample)
+    .then(() => {
+      saveCounter += 1;
+      setDbInfo("opgeslagen: " + parsed.bpm + " bpm", "ok");
+
+      if (saveCounter % 20 === 0) {
+        log("IndexedDB opslag OK: " + saveCounter + " metingen sinds start");
+        updateStorageEstimate();
+      }
+    })
+    .catch(e => {
+      setDbInfo("opslag fout: " + e, "bad");
+      log("IndexedDB opslag FOUT: " + e);
+    });
+
+  checkAlarm(parsed.bpm);
+  drawChart();
+}
+
+
+// ============================================================
+// ALARM
+// ============================================================
+
+function checkAlarm(bpm) {
+  const now = Date.now();
+  const limit = getLimit();
+  const requiredMs = getSecondsHigh() * 1000;
+
+  if (bpm > limit) {
+    if (aboveSince === null) {
+      aboveSince = now;
+    }
+
+    const highFor = Math.round((now - aboveSince) / 1000);
+    setStatus("Boven grens: " + highFor + " sec", "warn");
+
+    if ((now - aboveSince) >= requiredMs) {
+      if ((now - lastAlarm) >= getCooldownMs()) {
+        lastAlarm = now;
+        triggerAlarm(bpm);
+      }
+    }
+  } else {
+    aboveSince = null;
+    setStatus("Onder grens", "ok");
+    document.getElementById("mainCard").className = "card";
+  }
+}
+
+
+function triggerVibration() {
+  if (!("vibrate" in navigator)) {
+    log("Trillen wordt niet ondersteund door deze browser");
+    return;
+  }
+
+  navigator.vibrate([
+    900, 250,
+    900, 250,
+    1400, 300,
+    900, 250,
+    1800
+  ]);
+}
+
+
+function stopVibration() {
+  if ("vibrate" in navigator) {
+    navigator.vibrate(0);
+  }
+}
+
+
+function sleep(ms) {
+  return new Promise(resolve => setTimeout(resolve, ms));
+}
+
+
+async function beepOnce(durationMs = 450, frequency = 950) {
+  try {
+    if (!audioCtx) {
+      audioCtx = new (window.AudioContext || window.webkitAudioContext)();
+    }
+
+    await audioCtx.resume();
+
+    const osc = audioCtx.createOscillator();
+    const gain = audioCtx.createGain();
+
+    osc.frequency.value = frequency;
+    gain.gain.value = 0.35;
+
+    osc.connect(gain);
+    gain.connect(audioCtx.destination);
+
+    osc.start();
+
+    setTimeout(() => {
+      try {
+        osc.stop();
+        osc.disconnect();
+        gain.disconnect();
+      } catch (e) {}
+    }, durationMs);
+
+  } catch (e) {
+    log("Audio alarm lukte niet: " + e);
+  }
+}
+
+
+async function triggerAudioAlarm() {
+  for (let i = 0; i < 5; i++) {
+    await beepOnce(500, 950);
+    await sleep(250);
+  }
+}
+
+
+function triggerAlarm(bpm) {
+  document.getElementById("mainCard").className = "card alarm";
+
+  if (alarmMode === "audio") {
+    setStatus("🚨 AUDIOALARM: hartslag " + bpm + " bpm", "bad");
+    log("🚨 AUDIOALARM bij " + bpm + " bpm");
+    triggerAudioAlarm();
+  } else {
+    setStatus("🚨 TRILALARM: hartslag " + bpm + " bpm", "bad");
+    log("🚨 TRILALARM bij " + bpm + " bpm");
+    triggerVibration();
+  }
+}
+
+
+function testAlarm() {
+  triggerAlarm(getLimit() + 5);
+}
+
+
+// ============================================================
+// CHART
+// ============================================================
+
+function checkNewDay() {
+  const nowKey = getDayKey(new Date());
+
+  if (nowKey !== currentDayKey) {
+    currentDayKey = nowKey;
+    todaySamples = [];
+    document.getElementById("log").textContent = "";
+    drawChart();
+    log("Nieuwe dag: grafiek en log gereset");
+  }
+}
+
+
+function resizeCanvas(canvas) {
+  const ratio = window.devicePixelRatio || 1;
+  const rect = canvas.getBoundingClientRect();
+
+  const width = Math.max(300, Math.floor(rect.width * ratio));
+  const height = Math.floor(260 * ratio);
+
+  if (canvas.width !== width || canvas.height !== height) {
+    canvas.width = width;
+    canvas.height = height;
+  }
+
+  return { width, height, ratio };
+}
+
+
+function drawChart() {
+  const canvas = document.getElementById("hrChart");
+  if (!canvas) return;
+
+  const ctx = canvas.getContext("2d");
+  const size = resizeCanvas(canvas);
+
+  const w = size.width;
+  const h = size.height;
+  const ratio = size.ratio;
+
+  ctx.clearRect(0, 0, w, h);
+
+  const padLeft = 44 * ratio;
+  const padRight = 12 * ratio;
+  const padTop = 18 * ratio;
+  const padBottom = 34 * ratio;
+
+  const chartW = w - padLeft - padRight;
+  const chartH = h - padTop - padBottom;
+
+  ctx.fillStyle = "#101010";
+  ctx.fillRect(0, 0, w, h);
+
+  ctx.strokeStyle = "#333333";
+  ctx.lineWidth = 1 * ratio;
+  ctx.strokeRect(padLeft, padTop, chartW, chartH);
+
+  ctx.font = `${12 * ratio}px monospace`;
+  ctx.fillStyle = "#bbbbbb";
+
+  if (todaySamples.length < 2) {
+    ctx.fillText("Nog onvoldoende metingen voor grafiek", padLeft + 10 * ratio, padTop + 30 * ratio);
+    document.getElementById("chartInfo").textContent = "Nog onvoldoende metingen.";
+    return;
+  }
+
+  const limit = getLimit();
+
+  let minBpm = Math.min(...todaySamples.map(s => s.bpm), limit);
+  let maxBpm = Math.max(...todaySamples.map(s => s.bpm), limit);
+
+  minBpm = Math.max(30, Math.floor((minBpm - 5) / 5) * 5);
+  maxBpm = Math.min(220, Math.ceil((maxBpm + 5) / 5) * 5);
+
+  if (maxBpm <= minBpm) {
+    maxBpm = minBpm + 10;
+  }
+
+  const startTime = todaySamples[0].time;
+  const endTime = todaySamples[todaySamples.length - 1].time;
+  const timeSpan = Math.max(1, endTime - startTime);
+
+  function xFor(t) {
+    return padLeft + ((t - startTime) / timeSpan) * chartW;
+  }
+
+  function yFor(bpm) {
+    return padTop + (1 - ((bpm - minBpm) / (maxBpm - minBpm))) * chartH;
+  }
+
+  ctx.strokeStyle = "#2b2b2b";
+  ctx.lineWidth = 1 * ratio;
+  ctx.fillStyle = "#bbbbbb";
+
+  const gridCount = 4;
+
+  for (let i = 0; i <= gridCount; i++) {
+    const bpm = minBpm + ((maxBpm - minBpm) / gridCount) * i;
+    const y = yFor(bpm);
+
+    ctx.beginPath();
+    ctx.moveTo(padLeft, y);
+    ctx.lineTo(padLeft + chartW, y);
+    ctx.stroke();
+
+    ctx.fillText(String(Math.round(bpm)), 6 * ratio, y + 4 * ratio);
+  }
+
+  const limitY = yFor(limit);
+
+  ctx.strokeStyle = "#ff4444";
+  ctx.lineWidth = 1.5 * ratio;
+  ctx.setLineDash([6 * ratio, 5 * ratio]);
+
+  ctx.beginPath();
+  ctx.moveTo(padLeft, limitY);
+  ctx.lineTo(padLeft + chartW, limitY);
+  ctx.stroke();
+
+  ctx.setLineDash([]);
+
+  ctx.fillStyle = "#ff7777";
+  ctx.fillText("grens " + limit, padLeft + 8 * ratio, limitY - 6 * ratio);
+
+  ctx.lineWidth = 2.5 * ratio;
+  ctx.lineCap = "round";
+  ctx.lineJoin = "round";
+
+  for (let i = 1; i < todaySamples.length; i++) {
+    const a = todaySamples[i - 1];
+    const b = todaySamples[i];
+
+    const x1 = xFor(a.time);
+    const y1 = yFor(a.bpm);
+    const x2 = xFor(b.time);
+    const y2 = yFor(b.bpm);
+
+    ctx.strokeStyle = b.bpm > limit ? "#f44336" : "#2196f3";
+
+    ctx.beginPath();
+    ctx.moveTo(x1, y1);
+    ctx.lineTo(x2, y2);
+    ctx.stroke();
+  }
+
+  ctx.fillStyle = "#bbbbbb";
+  ctx.font = `${11 * ratio}px monospace`;
+
+  const firstLabel = new Date(startTime).toLocaleTimeString([], {hour: "2-digit", minute: "2-digit"});
+  const lastLabel = new Date(endTime).toLocaleTimeString([], {hour: "2-digit", minute: "2-digit"});
+
+  ctx.fillText(firstLabel, padLeft, h - 10 * ratio);
+  ctx.fillText(lastLabel, padLeft + chartW - 45 * ratio, h - 10 * ratio);
+
+  const latest = todaySamples[todaySamples.length - 1].bpm;
+  const highCount = todaySamples.filter(s => s.bpm > limit).length;
+
+  document.getElementById("chartInfo").textContent =
+    "Metingen vandaag: " + todaySamples.length +
+    " | laatste: " + latest + " bpm" +
+    " | boven grens: " + highCount;
+}
+
+
+// ============================================================
+// STARTUP
+// ============================================================
+
+window.addEventListener("resize", drawChart);
+setInterval(checkNewDay, 60000);
+setInterval(updateStorageEstimate, 60000);
+setTimeout(drawChart, 500);
+
+window.addEventListener("load", async () => {
+  try {
+    await registerServiceWorker();
+  } catch (e) {
+    log("Service worker startup fout: " + e);
+  }
+
+  try {
+    await openIndexedDb();
+    log("IndexedDB geopend");
+    await loadTodayFromIndexedDb();
+  } catch (e) {
+    setDbInfo("open fout: " + e, "bad");
+    log("IndexedDB open FOUT: " + e);
+  }
+
+  await updateStorageEstimate();
+
+  updateLastDeviceInfo();
+  requestScreenWakeLock();
+
+  setTimeout(() => {
+    autoConnectLastBandOnStartup();
+  }, 1000);
+});
+</script>
+</body>
+</html>
