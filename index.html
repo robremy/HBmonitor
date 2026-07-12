@@ -2,7 +2,7 @@
 <html lang="nl">
 <head>
   <meta charset="utf-8">
-  <meta name="viewport" content="width=device-width,initial-scale=1">
+  <meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover">
   <meta name="theme-color" content="#0b0b0b">
   <meta name="mobile-web-app-capable" content="yes">
   <meta name="apple-mobile-web-app-capable" content="yes">
@@ -16,10 +16,19 @@
   <title>Xiaomi Band Hartslag Alarm PWA</title>
 
   <style>
+    :root {
+      color-scheme: dark;
+    }
+
+    * {
+      box-sizing: border-box;
+    }
+
     body {
       font-family: system-ui, Arial, sans-serif;
       margin: 0;
       padding: 18px;
+      padding-bottom: calc(18px + env(safe-area-inset-bottom, 0px));
       background: #0b0b0b;
       color: #f2f2f2;
     }
@@ -48,17 +57,24 @@
       font-size: 16px;
       color: #bbb;
       margin-top: 6px;
+      overflow-wrap: anywhere;
     }
 
     button {
       font-size: 17px;
-      padding: 14px 14px;
+      padding: 14px;
       border: 0;
       border-radius: 12px;
       margin: 6px 4px 6px 0;
       background: #1e88e5;
       color: white;
       font-weight: 700;
+      cursor: pointer;
+    }
+
+    button:disabled {
+      opacity: 0.65;
+      cursor: default;
     }
 
     button.red { background: #c62828; }
@@ -92,8 +108,30 @@
     .warn { color: #ffcc33; }
     .bad { color: #ff5555; }
 
+    .update-line {
+      display: none;
+      margin-top: 10px;
+      padding: 10px;
+      border: 1px solid #d39b21;
+      border-radius: 10px;
+      background: #342500;
+      color: #ffdb75;
+    }
+
+    .update-line.visible {
+      display: block;
+    }
+
+    .update-line button {
+      display: inline-block;
+      font-size: 14px;
+      padding: 9px 11px;
+      margin: 8px 0 0 0;
+    }
+
     pre {
       white-space: pre-wrap;
+      overflow-wrap: anywhere;
       font-size: 13px;
       color: #ddd;
       background: #111;
@@ -148,6 +186,14 @@
     <div id="lastDeviceInfo" class="status"></div>
     <div id="wakeLockInfo" class="status"></div>
     <div id="pwaInfo" class="status">PWA: initialiseren...</div>
+    <div id="softwareVersionInfo" class="status">Softwareversie: 2026.07.12-v4</div>
+    <div id="updateInfo" class="update-line" role="status" aria-live="polite">
+      <strong>Nieuwe softwareversie beschikbaar.</strong><br>
+      Werk bij wanneer de hartslagmeting veilig onderbroken kan worden.<br>
+      <button id="updateButton" class="purple" type="button" onclick="applyPwaUpdate()">
+        Nu bijwerken
+      </button>
+    </div>
     <div id="dbInfo" class="status">IndexedDB: initialiseren...</div>
     <div id="storageInfo" class="status">Opslag: controleren...</div>
   </div>
@@ -182,7 +228,8 @@
 
     <div class="small">
       Chrome doet Web Bluetooth, alarm, grafiek en opslag zelf.
-      Metingen worden lokaal opgeslagen in IndexedDB. Default alarmgrens: 76 bpm. Dit is alleen een bovengrens: het alarm gaat af bij een hartslag hoger dan 76 bpm.
+      Metingen worden lokaal opgeslagen in IndexedDB. De standaard alarmgrens is 76 bpm.
+      Dit is alleen een bovengrens: het alarm gaat af bij een hartslag hoger dan 76 bpm.
     </div>
   </div>
 
@@ -213,103 +260,93 @@
   </div>
 
 <script>
+"use strict";
+
+const SOFTWARE_VERSION = "2026.07.12-v4";
+
 const HR_SERVICE = "0000180d-0000-1000-8000-00805f9b34fb";
 const HR_MEASUREMENT = "00002a37-0000-1000-8000-00805f9b34fb";
 
 const STORAGE_LAST_NAME = "xiaomi_band10_last_device_name_pwa_v1";
-
 const DB_NAME = "xiaomi_band10_heart_rate_db";
 const DB_VERSION = 1;
 const STORE_NAME = "samples";
 
 let db = null;
-
 let device = null;
 let server = null;
 let characteristic = null;
-
 let aboveSince = null;
 let lastAlarm = 0;
 let screenWakeLock = null;
-
 let alarmMode = "vibrate";
 let audioCtx = null;
-
 let todaySamples = [];
 let currentDayKey = getDayKey(new Date());
-
 let saveCounter = 0;
 let deferredInstallPrompt = null;
+let waitingServiceWorker = null;
+let reloadingAfterUpdate = false;
+let serviceWorkerRegistration = null;
 
-
-function getDayKey(d) {
-  return d.getFullYear() + "-" +
-    String(d.getMonth() + 1).padStart(2, "0") + "-" +
-    String(d.getDate()).padStart(2, "0");
+function getDayKey(date) {
+  return date.getFullYear() + "-" +
+    String(date.getMonth() + 1).padStart(2, "0") + "-" +
+    String(date.getDate()).padStart(2, "0");
 }
 
-
-function log(msg) {
-  const el = document.getElementById("log");
-  const line = new Date().toLocaleTimeString() + " | " + msg;
-  el.textContent = line + "\n" + el.textContent;
+function log(message) {
+  const element = document.getElementById("log");
+  const line = new Date().toLocaleTimeString() + " | " + message;
+  element.textContent = line + "\n" + element.textContent;
 }
 
-
-function setStatus(msg, cls = "") {
-  const el = document.getElementById("alarmStatus");
-  el.textContent = msg;
-  el.className = "status " + cls;
+function setStatus(message, className = "") {
+  const element = document.getElementById("alarmStatus");
+  element.textContent = message;
+  element.className = "status " + className;
 }
 
-
-function setDbInfo(msg, cls = "") {
-  const el = document.getElementById("dbInfo");
-  el.textContent = "IndexedDB: " + msg;
-  el.className = "status " + cls;
+function setDbInfo(message, className = "") {
+  const element = document.getElementById("dbInfo");
+  element.textContent = "IndexedDB: " + message;
+  element.className = "status " + className;
 }
 
-
-function setPwaInfo(msg, cls = "") {
-  const el = document.getElementById("pwaInfo");
-  el.textContent = "PWA: " + msg;
-  el.className = "status " + cls;
+function setPwaInfo(message, className = "") {
+  const element = document.getElementById("pwaInfo");
+  element.textContent = "PWA: " + message;
+  element.className = "status " + className;
 }
 
-
-function setStorageInfo(msg, cls = "") {
-  const el = document.getElementById("storageInfo");
-  el.textContent = "Opslag: " + msg;
-  el.className = "status " + cls;
+function setStorageInfo(message, className = "") {
+  const element = document.getElementById("storageInfo");
+  element.textContent = "Opslag: " + message;
+  element.className = "status " + className;
 }
-
 
 function getLimit() {
   return Number(document.getElementById("limit").value || 76);
 }
 
-
 function getSecondsHigh() {
   return Number(document.getElementById("secondsHigh").value || 10);
 }
-
 
 function getCooldownMs() {
   return Number(document.getElementById("cooldown").value || 30) * 1000;
 }
 
-
 // ============================================================
-// PWA INSTALL + SERVICE WORKER
+// PWA INSTALLATIE EN UPDATES
 // ============================================================
 
-window.addEventListener("beforeinstallprompt", (event) => {
+window.addEventListener("beforeinstallprompt", event => {
   event.preventDefault();
   deferredInstallPrompt = event;
   document.getElementById("installBtn").style.display = "inline-block";
   setPwaInfo("installatie beschikbaar", "ok");
 });
-
 
 window.addEventListener("appinstalled", () => {
   deferredInstallPrompt = null;
@@ -317,7 +354,6 @@ window.addEventListener("appinstalled", () => {
   setPwaInfo("geïnstalleerd", "ok");
   log("PWA geïnstalleerd");
 });
-
 
 async function installPwa() {
   if (!deferredInstallPrompt) {
@@ -327,13 +363,82 @@ async function installPwa() {
 
   deferredInstallPrompt.prompt();
   const choice = await deferredInstallPrompt.userChoice;
-
   log("Installatiekeuze: " + choice.outcome);
-
   deferredInstallPrompt = null;
   document.getElementById("installBtn").style.display = "none";
 }
 
+function showPwaUpdate(worker) {
+  if (!worker) {
+    return;
+  }
+
+  waitingServiceWorker = worker;
+  document.getElementById("updateInfo").classList.add("visible");
+  setPwaInfo("nieuwe versie beschikbaar", "warn");
+  log("Nieuwe softwareversie beschikbaar");
+}
+
+async function applyPwaUpdate() {
+  if (!waitingServiceWorker && serviceWorkerRegistration) {
+    waitingServiceWorker = serviceWorkerRegistration.waiting;
+  }
+
+  if (!waitingServiceWorker) {
+    log("Geen wachtende software-update gevonden; opnieuw controleren");
+
+    if (serviceWorkerRegistration) {
+      await serviceWorkerRegistration.update();
+    }
+    return;
+  }
+
+  const bandConnected = Boolean(
+    device && device.gatt && device.gatt.connected
+  );
+
+  if (bandConnected) {
+    const confirmed = confirm(
+      "De hartslagmeting is actief.\n\n" +
+      "Bijwerken verbreekt de Bluetooth-verbinding en herlaadt de app.\n\n" +
+      "Nu toch bijwerken?"
+    );
+
+    if (!confirmed) {
+      return;
+    }
+
+    disconnectBand();
+    await new Promise(resolve => setTimeout(resolve, 500));
+  }
+
+  const button = document.getElementById("updateButton");
+  button.disabled = true;
+  button.textContent = "Bijwerken...";
+  log("Nieuwe softwareversie activeren");
+
+  waitingServiceWorker.postMessage({
+    type: "SKIP_WAITING"
+  });
+}
+
+function watchInstallingWorker(registration, installingWorker) {
+  if (!installingWorker || installingWorker.__hbMonitorWatched) {
+    return;
+  }
+
+  installingWorker.__hbMonitorWatched = true;
+  log("Nieuwe service worker gevonden");
+
+  installingWorker.addEventListener("statechange", () => {
+    if (
+      installingWorker.state === "installed" &&
+      navigator.serviceWorker.controller
+    ) {
+      showPwaUpdate(registration.waiting || installingWorker);
+    }
+  });
+}
 
 async function registerServiceWorker() {
   if (!("serviceWorker" in navigator)) {
@@ -342,30 +447,60 @@ async function registerServiceWorker() {
   }
 
   try {
-    const reg = await navigator.serviceWorker.register("./sw.js", {
-      scope: "./"
+    const registration = await navigator.serviceWorker.register("./sw.js", {
+      scope: "./",
+      updateViaCache: "none"
     });
 
+    serviceWorkerRegistration = registration;
     setPwaInfo("offline cache actief", "ok");
     log("Service worker geregistreerd");
 
-    if (reg.waiting) {
-      log("Nieuwe versie wacht. Sluit en open app opnieuw voor update.");
+    if (registration.waiting && navigator.serviceWorker.controller) {
+      showPwaUpdate(registration.waiting);
     }
 
-    reg.addEventListener("updatefound", () => {
-      log("Nieuwe service worker update gevonden");
+    watchInstallingWorker(registration, registration.installing);
+
+    registration.addEventListener("updatefound", () => {
+      watchInstallingWorker(registration, registration.installing);
     });
 
-  } catch (e) {
+    navigator.serviceWorker.addEventListener("controllerchange", () => {
+      if (reloadingAfterUpdate) {
+        return;
+      }
+
+      reloadingAfterUpdate = true;
+      log("Nieuwe softwareversie actief; app herladen");
+      window.location.reload();
+    });
+
+    await registration.update();
+
+    window.setInterval(() => {
+      registration.update().catch(error => {
+        log("Automatische updatecontrole mislukt: " + error);
+      });
+    }, 60 * 60 * 1000);
+
+    document.addEventListener("visibilitychange", () => {
+      if (document.visibilityState === "visible") {
+        registration.update().catch(() => {});
+      }
+    });
+
+    window.addEventListener("online", () => {
+      registration.update().catch(() => {});
+    });
+  } catch (error) {
     setPwaInfo("service worker fout", "bad");
-    log("Service worker registratie FOUT: " + e);
+    log("Service worker registratie FOUT: " + error);
   }
 }
 
-
 // ============================================================
-// STORAGE PERSISTENCE
+// OPSLAG
 // ============================================================
 
 async function updateStorageEstimate() {
@@ -375,10 +510,13 @@ async function updateStorageEstimate() {
       return;
     }
 
-    const est = await navigator.storage.estimate();
-
-    const usedMb = est.usage ? Math.round(est.usage / 1024 / 1024 * 10) / 10 : 0;
-    const quotaMb = est.quota ? Math.round(est.quota / 1024 / 1024) : "?";
+    const estimate = await navigator.storage.estimate();
+    const usedMb = estimate.usage
+      ? Math.round((estimate.usage / 1024 / 1024) * 10) / 10
+      : 0;
+    const quotaMb = estimate.quota
+      ? Math.round(estimate.quota / 1024 / 1024)
+      : "?";
 
     let persistedText = "";
 
@@ -387,13 +525,14 @@ async function updateStorageEstimate() {
       persistedText = persisted ? " | persistent" : " | niet persistent";
     }
 
-    setStorageInfo(usedMb + " MB gebruikt / " + quotaMb + " MB quota" + persistedText, "ok");
-
-  } catch (e) {
-    setStorageInfo("estimate fout: " + e, "bad");
+    setStorageInfo(
+      usedMb + " MB gebruikt / " + quotaMb + " MB quota" + persistedText,
+      "ok"
+    );
+  } catch (error) {
+    setStorageInfo("estimate fout: " + error, "bad");
   }
 }
-
 
 async function requestPersistentStorage() {
   try {
@@ -414,13 +553,11 @@ async function requestPersistentStorage() {
     }
 
     await updateStorageEstimate();
-
-  } catch (e) {
-    setStorageInfo("persistent storage fout: " + e, "bad");
-    log("Persistent storage FOUT: " + e);
+  } catch (error) {
+    setStorageInfo("persistent storage fout: " + error, "bad");
+    log("Persistent storage FOUT: " + error);
   }
 }
-
 
 // ============================================================
 // INDEXEDDB
@@ -433,9 +570,9 @@ function openIndexedDb() {
       return;
     }
 
-    const req = indexedDB.open(DB_NAME, DB_VERSION);
+    const request = indexedDB.open(DB_NAME, DB_VERSION);
 
-    req.onupgradeneeded = function(event) {
+    request.onupgradeneeded = event => {
       const database = event.target.result;
 
       if (!database.objectStoreNames.contains(STORE_NAME)) {
@@ -449,10 +586,10 @@ function openIndexedDb() {
       }
     };
 
-    req.onsuccess = function(event) {
+    request.onsuccess = event => {
       db = event.target.result;
 
-      db.onversionchange = function() {
+      db.onversionchange = () => {
         db.close();
         alert("Nieuwe databaseversie beschikbaar. Sluit en open de app opnieuw.");
       };
@@ -461,12 +598,11 @@ function openIndexedDb() {
       resolve(db);
     };
 
-    req.onerror = function(event) {
+    request.onerror = event => {
       reject(event.target.error);
     };
   });
 }
-
 
 function saveSampleIndexedDb(sample) {
   return new Promise((resolve, reject) => {
@@ -475,21 +611,12 @@ function saveSampleIndexedDb(sample) {
       return;
     }
 
-    const tx = db.transaction(STORE_NAME, "readwrite");
-    const store = tx.objectStore(STORE_NAME);
-
-    store.put(sample);
-
-    tx.oncomplete = function() {
-      resolve(true);
-    };
-
-    tx.onerror = function(event) {
-      reject(event.target.error);
-    };
+    const transaction = db.transaction(STORE_NAME, "readwrite");
+    transaction.objectStore(STORE_NAME).put(sample);
+    transaction.oncomplete = () => resolve(true);
+    transaction.onerror = event => reject(event.target.error);
   });
 }
-
 
 function getSamplesByDate(dateKey) {
   return new Promise((resolve, reject) => {
@@ -498,23 +625,19 @@ function getSamplesByDate(dateKey) {
       return;
     }
 
-    const tx = db.transaction(STORE_NAME, "readonly");
-    const store = tx.objectStore(STORE_NAME);
-    const index = store.index("date_key");
-    const req = index.getAll(IDBKeyRange.only(dateKey));
+    const transaction = db.transaction(STORE_NAME, "readonly");
+    const index = transaction.objectStore(STORE_NAME).index("date_key");
+    const request = index.getAll(IDBKeyRange.only(dateKey));
 
-    req.onsuccess = function() {
-      const rows = req.result || [];
+    request.onsuccess = () => {
+      const rows = request.result || [];
       rows.sort((a, b) => a.ts_ms - b.ts_ms);
       resolve(rows);
     };
 
-    req.onerror = function(event) {
-      reject(event.target.error);
-    };
+    request.onerror = event => reject(event.target.error);
   });
 }
-
 
 function getAllSamples() {
   return new Promise((resolve, reject) => {
@@ -523,20 +646,12 @@ function getAllSamples() {
       return;
     }
 
-    const tx = db.transaction(STORE_NAME, "readonly");
-    const store = tx.objectStore(STORE_NAME);
-    const req = store.getAll();
-
-    req.onsuccess = function() {
-      resolve(req.result || []);
-    };
-
-    req.onerror = function(event) {
-      reject(event.target.error);
-    };
+    const transaction = db.transaction(STORE_NAME, "readonly");
+    const request = transaction.objectStore(STORE_NAME).getAll();
+    request.onsuccess = () => resolve(request.result || []);
+    request.onerror = event => reject(event.target.error);
   });
 }
-
 
 function deleteSamplesByDate(dateKey) {
   return new Promise((resolve, reject) => {
@@ -545,14 +660,12 @@ function deleteSamplesByDate(dateKey) {
       return;
     }
 
-    const tx = db.transaction(STORE_NAME, "readwrite");
-    const store = tx.objectStore(STORE_NAME);
-    const index = store.index("date_key");
-    const req = index.openCursor(IDBKeyRange.only(dateKey));
-
+    const transaction = db.transaction(STORE_NAME, "readwrite");
+    const index = transaction.objectStore(STORE_NAME).index("date_key");
+    const request = index.openCursor(IDBKeyRange.only(dateKey));
     let deleted = 0;
 
-    req.onsuccess = function(event) {
+    request.onsuccess = event => {
       const cursor = event.target.result;
 
       if (cursor) {
@@ -562,34 +675,31 @@ function deleteSamplesByDate(dateKey) {
       }
     };
 
-    tx.oncomplete = function() {
-      resolve(deleted);
-    };
-
-    tx.onerror = function(event) {
-      reject(event.target.error);
-    };
+    transaction.oncomplete = () => resolve(deleted);
+    transaction.onerror = event => reject(event.target.error);
   });
 }
 
-
-function downsampleSamples(samples, maxPoints=4000) {
-  if (samples.length <= maxPoints) return samples;
+function downsampleSamples(samples, maxPoints = 4000) {
+  if (samples.length <= maxPoints) {
+    return samples;
+  }
 
   const step = Math.max(1, Math.floor(samples.length / maxPoints));
-  const out = [];
+  const output = [];
 
-  for (let i = 0; i < samples.length; i += step) {
-    out.push(samples[i]);
+  for (let index = 0; index < samples.length; index += step) {
+    output.push(samples[index]);
   }
 
-  if (out[out.length - 1] !== samples[samples.length - 1]) {
-    out.push(samples[samples.length - 1]);
+  const finalSample = samples[samples.length - 1];
+
+  if (output[output.length - 1] !== finalSample) {
+    output.push(finalSample);
   }
 
-  return out;
+  return output;
 }
-
 
 function summarizeSamples(samples, dateKey) {
   if (!samples || samples.length === 0) {
@@ -607,9 +717,9 @@ function summarizeSamples(samples, dateKey) {
   }
 
   const sorted = [...samples].sort((a, b) => a.ts_ms - b.ts_ms);
-  const bpms = sorted.map(s => s.bpm);
-  const aboveCount = sorted.filter(s => s.above_limit).length;
-  const sum = bpms.reduce((a, b) => a + b, 0);
+  const bpms = sorted.map(sample => sample.bpm);
+  const aboveCount = sorted.filter(sample => sample.above_limit).length;
+  const sum = bpms.reduce((total, bpm) => total + bpm, 0);
 
   return {
     date: dateKey,
@@ -624,17 +734,17 @@ function summarizeSamples(samples, dateKey) {
   };
 }
 
-
 async function showDays() {
   try {
     const rows = await getAllSamples();
     const groups = {};
 
-    for (const s of rows) {
-      if (!groups[s.date_key]) {
-        groups[s.date_key] = [];
+    for (const sample of rows) {
+      if (!groups[sample.date_key]) {
+        groups[sample.date_key] = [];
       }
-      groups[s.date_key].push(s);
+
+      groups[sample.date_key].push(sample);
     }
 
     const days = Object.keys(groups)
@@ -647,27 +757,24 @@ async function showDays() {
 
     setDbInfo("dagen geladen", "ok");
     await updateStorageEstimate();
-
-  } catch (e) {
-    document.getElementById("queryOutput").textContent = "Fout: " + e;
+  } catch (error) {
+    document.getElementById("queryOutput").textContent = "Fout: " + error;
     setDbInfo("dagen fout", "bad");
   }
 }
-
 
 async function loadTodayFromIndexedDb() {
   try {
     const dateKey = getDayKey(new Date());
     const rows = await getSamplesByDate(dateKey);
-
     const sampled = downsampleSamples(rows, 4000);
 
-    todaySamples = sampled.map(s => ({
-      time: s.ts_ms,
-      label: s.time_label,
-      bpm: s.bpm,
-      alarm_limit: s.alarm_limit,
-      above_limit: s.above_limit
+    todaySamples = sampled.map(sample => ({
+      time: sample.ts_ms,
+      label: sample.time_label,
+      bpm: sample.bpm,
+      alarm_limit: sample.alarm_limit,
+      above_limit: sample.above_limit
     }));
 
     drawChart();
@@ -683,13 +790,11 @@ async function loadTodayFromIndexedDb() {
     log("Vandaag geladen uit IndexedDB: " + rows.length + " metingen");
     setDbInfo("vandaag geladen", "ok");
     await updateStorageEstimate();
-
-  } catch (e) {
-    document.getElementById("queryOutput").textContent = "Fout: " + e;
+  } catch (error) {
+    document.getElementById("queryOutput").textContent = "Fout: " + error;
     setDbInfo("laden fout", "bad");
   }
 }
-
 
 async function showStatsToday() {
   try {
@@ -702,31 +807,30 @@ async function showStatsToday() {
 
     setDbInfo("stats geladen", "ok");
     await updateStorageEstimate();
-
-  } catch (e) {
-    document.getElementById("queryOutput").textContent = "Fout: " + e;
+  } catch (error) {
+    document.getElementById("queryOutput").textContent = "Fout: " + error;
     setDbInfo("stats fout", "bad");
   }
 }
 
-
 function csvEscape(value) {
-  if (value === null || value === undefined) return "";
-  const s = String(value);
-
-  if (s.includes(",") || s.includes('"') || s.includes("\n")) {
-    return '"' + s.replaceAll('"', '""') + '"';
+  if (value === null || value === undefined) {
+    return "";
   }
 
-  return s;
-}
+  const text = String(value);
 
+  if (text.includes(",") || text.includes('"') || text.includes("\n")) {
+    return '"' + text.replaceAll('"', '""') + '"';
+  }
+
+  return text;
+}
 
 async function downloadCsvToday() {
   try {
     const dateKey = getDayKey(new Date());
     const rows = await getSamplesByDate(dateKey);
-
     const headers = [
       "id",
       "ts_ms",
@@ -741,35 +845,31 @@ async function downloadCsvToday() {
       "alarm_mode"
     ];
 
-    const lines = [];
-    lines.push(headers.join(","));
+    const lines = [headers.join(",")];
 
-    for (const r of rows) {
-      lines.push(headers.map(h => csvEscape(r[h])).join(","));
+    for (const row of rows) {
+      lines.push(headers.map(header => csvEscape(row[header])).join(","));
     }
 
-    const csvText = lines.join("\n");
-    const blob = new Blob([csvText], { type: "text/csv;charset=utf-8" });
+    const blob = new Blob([lines.join("\n")], {
+      type: "text/csv;charset=utf-8"
+    });
     const url = URL.createObjectURL(blob);
-
-    const a = document.createElement("a");
-    a.href = url;
-    a.download = "heart_rate_" + dateKey + ".csv";
-    document.body.appendChild(a);
-    a.click();
-    document.body.removeChild(a);
-
+    const link = document.createElement("a");
+    link.href = url;
+    link.download = "heart_rate_" + dateKey + ".csv";
+    document.body.appendChild(link);
+    link.click();
+    link.remove();
     URL.revokeObjectURL(url);
 
     log("CSV gemaakt: " + rows.length + " metingen");
     setDbInfo("CSV gemaakt", "ok");
-
-  } catch (e) {
-    document.getElementById("queryOutput").textContent = "CSV fout: " + e;
+  } catch (error) {
+    document.getElementById("queryOutput").textContent = "CSV fout: " + error;
     setDbInfo("CSV fout", "bad");
   }
 }
-
 
 async function deleteTodayConfirm() {
   const dateKey = getDayKey(new Date());
@@ -780,7 +880,6 @@ async function deleteTodayConfirm() {
 
   try {
     const deleted = await deleteSamplesByDate(dateKey);
-
     todaySamples = [];
     drawChart();
 
@@ -790,75 +889,67 @@ async function deleteTodayConfirm() {
     log("Verwijderd uit IndexedDB: " + deleted + " metingen van vandaag");
     setDbInfo("vandaag verwijderd", "ok");
     await updateStorageEstimate();
-
-  } catch (e) {
-    document.getElementById("queryOutput").textContent = "Delete fout: " + e;
+  } catch (error) {
+    document.getElementById("queryOutput").textContent = "Delete fout: " + error;
     setDbInfo("delete fout", "bad");
   }
 }
 
-
 // ============================================================
-// BLUETOOTH + DEVICE MEMORY
+// BLUETOOTH EN DEVICEGEHEUGEN
 // ============================================================
 
-function saveLastDevice(dev) {
+function saveLastDevice(selectedDevice) {
   try {
-    if (!dev) return;
+    if (!selectedDevice) {
+      return;
+    }
 
-    const name = dev.name || "onbekend";
+    const name = selectedDevice.name || "onbekend";
     localStorage.setItem(STORAGE_LAST_NAME, name);
-
     updateLastDeviceInfo();
     log("Band onthouden: " + name);
-
-  } catch (e) {
-    log("Kon bandgegevens niet opslaan: " + e);
+  } catch (error) {
+    log("Kon bandgegevens niet opslaan: " + error);
   }
 }
-
 
 function updateLastDeviceInfo() {
   const name = localStorage.getItem(STORAGE_LAST_NAME);
-  const el = document.getElementById("lastDeviceInfo");
-
-  if (name) {
-    el.textContent = "Laatst gebruikt: " + name;
-  } else {
-    el.textContent = "Nog geen laatst gebruikte band opgeslagen";
-  }
+  const element = document.getElementById("lastDeviceInfo");
+  element.textContent = name
+    ? "Laatst gebruikt: " + name
+    : "Nog geen laatst gebruikte band opgeslagen";
 }
 
-
 function toggleAlarmMode() {
-  const btn = document.getElementById("alarmModeButton");
+  const button = document.getElementById("alarmModeButton");
 
   if (alarmMode === "vibrate") {
     alarmMode = "audio";
-    btn.textContent = "Alarm: audio";
-    btn.className = "red";
+    button.textContent = "Alarm: audio";
+    button.className = "red";
     log("Alarmmodus gewijzigd naar audio");
   } else {
     alarmMode = "vibrate";
-    btn.textContent = "Alarm: tril";
-    btn.className = "green";
+    button.textContent = "Alarm: tril";
+    button.className = "green";
     log("Alarmmodus gewijzigd naar tril");
   }
 }
 
-
 async function requestScreenWakeLock() {
-  const el = document.getElementById("wakeLockInfo");
+  const element = document.getElementById("wakeLockInfo");
 
   try {
     if (!("wakeLock" in navigator)) {
-      el.textContent = "Browser screen WakeLock niet ondersteund";
+      element.textContent = "Browser screen WakeLock niet ondersteund";
       log("Browser screen WakeLock niet ondersteund");
       return;
     }
 
     if (screenWakeLock !== null) {
-      el.textContent = "Browser screen WakeLock actief";
+      element.textContent = "Browser screen WakeLock actief";
       return;
     }
 
@@ -871,22 +962,13 @@ async function requestScreenWakeLock() {
       log("Browser screen WakeLock vrijgegeven");
     });
 
-    el.textContent = "Browser screen WakeLock actief";
+    element.textContent = "Browser screen WakeLock actief";
     log("Browser screen WakeLock actief");
-
-  } catch (e) {
-    el.textContent = "Browser screen WakeLock niet actief";
-    log("Browser screen WakeLock fout: " + e);
+  } catch (error) {
+    element.textContent = "Browser screen WakeLock niet actief";
+    log("Browser screen WakeLock fout: " + error);
   }
 }
-
-
-document.addEventListener("visibilitychange", () => {
-  if (document.visibilityState === "visible") {
-    requestScreenWakeLock();
-  }
-});
-
 
 async function connectBand() {
   try {
@@ -906,13 +988,14 @@ async function connectBand() {
     });
 
     await connectToDevice(device, true);
-
-  } catch (e) {
-    log("Fout bij verbinden: " + e);
-    setStatus("Fout bij verbinden. Sluit nRF Connect af en probeer opnieuw.", "bad");
+  } catch (error) {
+    log("Fout bij verbinden: " + error);
+    setStatus(
+      "Fout bij verbinden. Sluit nRF Connect af en probeer opnieuw.",
+      "bad"
+    );
   }
 }
-
 
 async function connectLastBand() {
   try {
@@ -933,7 +1016,6 @@ async function connectLastBand() {
 
     log("Laatst gebruikte band: " + lastName);
     log("Bluetooth-kiezer openen met filter...");
-
     setStatus("Kies je Xiaomi Smart Band opnieuw.", "warn");
 
     try {
@@ -946,8 +1028,8 @@ async function connectLastBand() {
         ],
         optionalServices: [HR_SERVICE]
       });
-    } catch (e1) {
-      log("Gefilterde keuze mislukt/geannuleerd: " + e1);
+    } catch (filteredError) {
+      log("Gefilterde keuze mislukt/geannuleerd: " + filteredError);
       log("Fallback: algemene Bluetooth-kiezer openen...");
 
       device = await navigator.bluetooth.requestDevice({
@@ -957,13 +1039,11 @@ async function connectLastBand() {
     }
 
     await connectToDevice(device, true);
-
-  } catch (e) {
-    log("Gebruik laatst verbonden band mislukt: " + e);
+  } catch (error) {
+    log("Gebruik laatst verbonden band mislukt: " + error);
     setStatus("Kiezen geannuleerd of mislukt.", "warn");
   }
 }
-
 
 async function autoConnectLastBandOnStartup() {
   await requestScreenWakeLock();
@@ -982,31 +1062,28 @@ async function autoConnectLastBandOnStartup() {
   setStatus("Druk op Gebruik laatst verbonden band.", "warn");
 }
 
-
-async function connectToDevice(dev, storeDevice) {
-  if (!dev) {
+async function connectToDevice(selectedDevice, storeDevice) {
+  if (!selectedDevice) {
     throw new Error("Geen device opgegeven");
   }
 
   document.getElementById("deviceName").textContent =
-    "Device: " + (dev.name || "onbekend");
+    "Device: " + (selectedDevice.name || "onbekend");
 
-  dev.addEventListener("gattserverdisconnected", onDisconnected);
-
-  log("Verbinden met " + (dev.name || "onbekend") + "...");
-  server = await dev.gatt.connect();
+  selectedDevice.addEventListener("gattserverdisconnected", onDisconnected);
+  log("Verbinden met " + (selectedDevice.name || "onbekend") + "...");
+  server = await selectedDevice.gatt.connect();
 
   log("Heart Rate Service zoeken...");
   const service = await server.getPrimaryService(HR_SERVICE);
 
   log("Heart Rate Measurement characteristic zoeken...");
   characteristic = await service.getCharacteristic(HR_MEASUREMENT);
-
   characteristic.addEventListener("characteristicvaluechanged", onHeartRate);
   await characteristic.startNotifications();
 
   if (storeDevice) {
-    saveLastDevice(dev);
+    saveLastDevice(selectedDevice);
   } else {
     updateLastDeviceInfo();
   }
@@ -1014,7 +1091,6 @@ async function connectToDevice(dev, storeDevice) {
   log("Live hartslag gestart");
   setStatus("Verbonden. Wacht op hartslag...", "ok");
 }
-
 
 function disconnectBand() {
   try {
@@ -1028,31 +1104,31 @@ function disconnectBand() {
       device.gatt.disconnect();
     }
 
+    characteristic = null;
+    server = null;
     log("Verbinding handmatig verbroken");
-
-  } catch (e) {
-    log("Fout bij verbreken: " + e);
+  } catch (error) {
+    log("Fout bij verbreken: " + error);
   }
 }
 
-
 function onDisconnected() {
   stopVibration();
+  characteristic = null;
+  server = null;
   log("Bluetooth verbinding verbroken");
   document.getElementById("contact").textContent = "Verbinding verbroken";
   setStatus("Verbinding verbroken", "bad");
   aboveSince = null;
 }
 
-
 function parseHeartRate(value) {
   const flags = value.getUint8(0);
   let index = 1;
-
-  const hrIs16Bit = (flags & 0x01) !== 0;
+  const heartRateIs16Bit = (flags & 0x01) !== 0;
   let bpm;
 
-  if (hrIs16Bit) {
+  if (heartRateIs16Bit) {
     bpm = value.getUint16(index, true);
     index += 2;
   } else {
@@ -1062,7 +1138,6 @@ function parseHeartRate(value) {
 
   const contactSupported = (flags & 0x04) !== 0;
   const contactDetected = (flags & 0x02) !== 0;
-
   let contact = "contact onbekend";
 
   if (contactSupported) {
@@ -1072,20 +1147,17 @@ function parseHeartRate(value) {
   return { bpm, contact };
 }
 
-
 async function onHeartRate(event) {
   checkNewDay();
 
-  const value = event.target.value;
-  const parsed = parseHeartRate(value);
-
+  const parsed = parseHeartRate(event.target.value);
   document.getElementById("bpm").textContent = parsed.bpm;
   document.getElementById("contact").textContent = parsed.contact;
 
   const now = new Date();
   const limit = getLimit();
   const above = parsed.bpm > limit;
-  const devName = device ? (device.name || "onbekend") : "onbekend";
+  const deviceName = device ? (device.name || "onbekend") : "onbekend";
 
   const sample = {
     id: String(now.getTime()) + "_" + Math.random().toString(36).slice(2),
@@ -1097,7 +1169,7 @@ async function onHeartRate(event) {
     alarm_limit: limit,
     above_limit: above ? 1 : 0,
     contact: parsed.contact,
-    device_name: devName,
+    device_name: deviceName,
     alarm_mode: alarmMode
   };
 
@@ -1113,7 +1185,9 @@ async function onHeartRate(event) {
     todaySamples = todaySamples.slice(-100000);
   }
 
-  const shortContact = parsed.contact.includes("gedetecteerd") ? "contact" : parsed.contact;
+  const shortContact = parsed.contact.includes("gedetecteerd")
+    ? "contact"
+    : parsed.contact;
   log(parsed.bpm + " bpm | " + shortContact);
 
   saveSampleIndexedDb(sample)
@@ -1126,15 +1200,14 @@ async function onHeartRate(event) {
         updateStorageEstimate();
       }
     })
-    .catch(e => {
-      setDbInfo("opslag fout: " + e, "bad");
-      log("IndexedDB opslag FOUT: " + e);
+    .catch(error => {
+      setDbInfo("opslag fout: " + error, "bad");
+      log("IndexedDB opslag FOUT: " + error);
     });
 
   checkAlarm(parsed.bpm);
   drawChart();
 }
-
 
 // ============================================================
 // ALARM
@@ -1151,21 +1224,28 @@ function checkAlarm(bpm) {
     }
 
     const highFor = Math.round((now - aboveSince) / 1000);
-    setStatus("Alarmstatus: hartslag boven alarmgrens (" + limit + " bpm) gedurende " + highFor + " sec", "warn");
+    setStatus(
+      "Alarmstatus: hartslag boven alarmgrens (" + limit +
+      " bpm) gedurende " + highFor + " sec",
+      "warn"
+    );
 
-    if ((now - aboveSince) >= requiredMs) {
-      if ((now - lastAlarm) >= getCooldownMs()) {
-        lastAlarm = now;
-        triggerAlarm(bpm);
-      }
+    if (
+      now - aboveSince >= requiredMs &&
+      now - lastAlarm >= getCooldownMs()
+    ) {
+      lastAlarm = now;
+      triggerAlarm(bpm);
     }
   } else {
     aboveSince = null;
-    setStatus("Alarmstatus: hartslag onder alarmgrens (" + limit + " bpm)", "ok");
+    setStatus(
+      "Alarmstatus: hartslag onder alarmgrens (" + limit + " bpm)",
+      "ok"
+    );
     document.getElementById("mainCard").className = "card";
   }
 }
-
 
 function triggerVibration() {
   if (!("vibrate" in navigator)) {
@@ -1182,18 +1262,15 @@ function triggerVibration() {
   ]);
 }
 
-
 function stopVibration() {
   if ("vibrate" in navigator) {
     navigator.vibrate(0);
   }
 }
 
-
-function sleep(ms) {
-  return new Promise(resolve => setTimeout(resolve, ms));
+function sleep(milliseconds) {
+  return new Promise(resolve => setTimeout(resolve, milliseconds));
 }
-
 
 async function beepOnce(durationMs = 450, frequency = 950) {
   try {
@@ -1202,39 +1279,32 @@ async function beepOnce(durationMs = 450, frequency = 950) {
     }
 
     await audioCtx.resume();
-
-    const osc = audioCtx.createOscillator();
+    const oscillator = audioCtx.createOscillator();
     const gain = audioCtx.createGain();
-
-    osc.frequency.value = frequency;
+    oscillator.frequency.value = frequency;
     gain.gain.value = 0.35;
-
-    osc.connect(gain);
+    oscillator.connect(gain);
     gain.connect(audioCtx.destination);
-
-    osc.start();
+    oscillator.start();
 
     setTimeout(() => {
       try {
-        osc.stop();
-        osc.disconnect();
+        oscillator.stop();
+        oscillator.disconnect();
         gain.disconnect();
-      } catch (e) {}
+      } catch (_) {}
     }, durationMs);
-
-  } catch (e) {
-    log("Audio alarm lukte niet: " + e);
+  } catch (error) {
+    log("Audio alarm lukte niet: " + error);
   }
 }
 
-
 async function triggerAudioAlarm() {
-  for (let i = 0; i < 5; i++) {
+  for (let index = 0; index < 5; index += 1) {
     await beepOnce(500, 950);
     await sleep(250);
   }
 }
-
 
 function triggerAlarm(bpm) {
   document.getElementById("mainCard").className = "card alarm";
@@ -1250,14 +1320,12 @@ function triggerAlarm(bpm) {
   }
 }
 
-
 function testAlarm() {
   triggerAlarm(getLimit() + 5);
 }
 
-
 // ============================================================
-// CHART
+// GRAFIEK
 // ============================================================
 
 function checkNewDay() {
@@ -1272,12 +1340,10 @@ function checkNewDay() {
   }
 }
 
-
 function resizeCanvas(canvas) {
   const ratio = window.devicePixelRatio || 1;
-  const rect = canvas.getBoundingClientRect();
-
-  const width = Math.max(300, Math.floor(rect.width * ratio));
+  const rectangle = canvas.getBoundingClientRect();
+  const width = Math.max(300, Math.floor(rectangle.width * ratio));
   const height = Math.floor(260 * ratio);
 
   if (canvas.width !== width || canvas.height !== height) {
@@ -1288,49 +1354,49 @@ function resizeCanvas(canvas) {
   return { width, height, ratio };
 }
 
-
 function drawChart() {
   const canvas = document.getElementById("hrChart");
-  if (!canvas) return;
 
-  const ctx = canvas.getContext("2d");
+  if (!canvas) {
+    return;
+  }
+
+  const context = canvas.getContext("2d");
   const size = resizeCanvas(canvas);
-
-  const w = size.width;
-  const h = size.height;
+  const width = size.width;
+  const height = size.height;
   const ratio = size.ratio;
-
-  ctx.clearRect(0, 0, w, h);
-
   const padLeft = 44 * ratio;
   const padRight = 12 * ratio;
   const padTop = 18 * ratio;
   const padBottom = 34 * ratio;
+  const chartWidth = width - padLeft - padRight;
+  const chartHeight = height - padTop - padBottom;
 
-  const chartW = w - padLeft - padRight;
-  const chartH = h - padTop - padBottom;
-
-  ctx.fillStyle = "#101010";
-  ctx.fillRect(0, 0, w, h);
-
-  ctx.strokeStyle = "#333333";
-  ctx.lineWidth = 1 * ratio;
-  ctx.strokeRect(padLeft, padTop, chartW, chartH);
-
-  ctx.font = `${12 * ratio}px monospace`;
-  ctx.fillStyle = "#bbbbbb";
+  context.clearRect(0, 0, width, height);
+  context.fillStyle = "#101010";
+  context.fillRect(0, 0, width, height);
+  context.strokeStyle = "#333333";
+  context.lineWidth = 1 * ratio;
+  context.strokeRect(padLeft, padTop, chartWidth, chartHeight);
+  context.font = `${12 * ratio}px monospace`;
+  context.fillStyle = "#bbbbbb";
 
   if (todaySamples.length < 2) {
-    ctx.fillText("Nog onvoldoende metingen voor grafiek", padLeft + 10 * ratio, padTop + 30 * ratio);
-    document.getElementById("chartInfo").textContent = "Nog onvoldoende metingen.";
+    context.fillText(
+      "Nog onvoldoende metingen voor grafiek",
+      padLeft + 10 * ratio,
+      padTop + 30 * ratio
+    );
+    document.getElementById("chartInfo").textContent =
+      "Nog onvoldoende metingen.";
     return;
   }
 
+  const samples = downsampleSamples(todaySamples, 4000);
   const limit = getLimit();
-
-  let minBpm = Math.min(...todaySamples.map(s => s.bpm), limit);
-  let maxBpm = Math.max(...todaySamples.map(s => s.bpm), limit);
-
+  let minBpm = Math.min(...samples.map(sample => sample.bpm), limit);
+  let maxBpm = Math.max(...samples.map(sample => sample.bpm), limit);
   minBpm = Math.max(30, Math.floor((minBpm - 5) / 5) * 5);
   maxBpm = Math.min(220, Math.ceil((maxBpm + 5) / 5) * 5);
 
@@ -1338,94 +1404,79 @@ function drawChart() {
     maxBpm = minBpm + 10;
   }
 
-  const startTime = todaySamples[0].time;
-  const endTime = todaySamples[todaySamples.length - 1].time;
+  const startTime = samples[0].time;
+  const endTime = samples[samples.length - 1].time;
   const timeSpan = Math.max(1, endTime - startTime);
 
-  function xFor(t) {
-    return padLeft + ((t - startTime) / timeSpan) * chartW;
-  }
+  const xFor = time =>
+    padLeft + ((time - startTime) / timeSpan) * chartWidth;
+  const yFor = bpm =>
+    padTop + (1 - ((bpm - minBpm) / (maxBpm - minBpm))) * chartHeight;
 
-  function yFor(bpm) {
-    return padTop + (1 - ((bpm - minBpm) / (maxBpm - minBpm))) * chartH;
-  }
-
-  ctx.strokeStyle = "#2b2b2b";
-  ctx.lineWidth = 1 * ratio;
-  ctx.fillStyle = "#bbbbbb";
-
+  context.strokeStyle = "#2b2b2b";
+  context.lineWidth = 1 * ratio;
+  context.fillStyle = "#bbbbbb";
   const gridCount = 4;
 
-  for (let i = 0; i <= gridCount; i++) {
-    const bpm = minBpm + ((maxBpm - minBpm) / gridCount) * i;
+  for (let index = 0; index <= gridCount; index += 1) {
+    const bpm = minBpm + ((maxBpm - minBpm) / gridCount) * index;
     const y = yFor(bpm);
-
-    ctx.beginPath();
-    ctx.moveTo(padLeft, y);
-    ctx.lineTo(padLeft + chartW, y);
-    ctx.stroke();
-
-    ctx.fillText(String(Math.round(bpm)), 6 * ratio, y + 4 * ratio);
+    context.beginPath();
+    context.moveTo(padLeft, y);
+    context.lineTo(padLeft + chartWidth, y);
+    context.stroke();
+    context.fillText(String(Math.round(bpm)), 6 * ratio, y + 4 * ratio);
   }
 
   const limitY = yFor(limit);
+  context.strokeStyle = "#ff4444";
+  context.lineWidth = 1.5 * ratio;
+  context.setLineDash([6 * ratio, 5 * ratio]);
+  context.beginPath();
+  context.moveTo(padLeft, limitY);
+  context.lineTo(padLeft + chartWidth, limitY);
+  context.stroke();
+  context.setLineDash([]);
+  context.fillStyle = "#ff7777";
+  context.fillText("grens " + limit, padLeft + 8 * ratio, limitY - 6 * ratio);
 
-  ctx.strokeStyle = "#ff4444";
-  ctx.lineWidth = 1.5 * ratio;
-  ctx.setLineDash([6 * ratio, 5 * ratio]);
+  context.lineWidth = 2.5 * ratio;
+  context.lineCap = "round";
+  context.lineJoin = "round";
 
-  ctx.beginPath();
-  ctx.moveTo(padLeft, limitY);
-  ctx.lineTo(padLeft + chartW, limitY);
-  ctx.stroke();
-
-  ctx.setLineDash([]);
-
-  ctx.fillStyle = "#ff7777";
-  ctx.fillText("grens " + limit, padLeft + 8 * ratio, limitY - 6 * ratio);
-
-  ctx.lineWidth = 2.5 * ratio;
-  ctx.lineCap = "round";
-  ctx.lineJoin = "round";
-
-  for (let i = 1; i < todaySamples.length; i++) {
-    const a = todaySamples[i - 1];
-    const b = todaySamples[i];
-
-    const x1 = xFor(a.time);
-    const y1 = yFor(a.bpm);
-    const x2 = xFor(b.time);
-    const y2 = yFor(b.bpm);
-
-    ctx.strokeStyle = b.bpm > limit ? "#f44336" : "#2196f3";
-
-    ctx.beginPath();
-    ctx.moveTo(x1, y1);
-    ctx.lineTo(x2, y2);
-    ctx.stroke();
+  for (let index = 1; index < samples.length; index += 1) {
+    const previous = samples[index - 1];
+    const current = samples[index];
+    context.strokeStyle = current.bpm > limit ? "#f44336" : "#2196f3";
+    context.beginPath();
+    context.moveTo(xFor(previous.time), yFor(previous.bpm));
+    context.lineTo(xFor(current.time), yFor(current.bpm));
+    context.stroke();
   }
 
-  ctx.fillStyle = "#bbbbbb";
-  ctx.font = `${11 * ratio}px monospace`;
+  context.fillStyle = "#bbbbbb";
+  context.font = `${11 * ratio}px monospace`;
+  const firstLabel = new Date(startTime).toLocaleTimeString([], {
+    hour: "2-digit",
+    minute: "2-digit"
+  });
+  const lastLabel = new Date(endTime).toLocaleTimeString([], {
+    hour: "2-digit",
+    minute: "2-digit"
+  });
+  context.fillText(firstLabel, padLeft, height - 10 * ratio);
+  context.fillText(lastLabel, padLeft + chartWidth - 45 * ratio, height - 10 * ratio);
 
-  const firstLabel = new Date(startTime).toLocaleTimeString([], {hour: "2-digit", minute: "2-digit"});
-  const lastLabel = new Date(endTime).toLocaleTimeString([], {hour: "2-digit", minute: "2-digit"});
-
-  ctx.fillText(firstLabel, padLeft, h - 10 * ratio);
-  ctx.fillText(lastLabel, padLeft + chartW - 45 * ratio, h - 10 * ratio);
-
-  const latest = todaySamples[todaySamples.length - 1].bpm;
-  const highCount = todaySamples.filter(s => s.bpm > limit).length;
-
+  const latest = samples[samples.length - 1].bpm;
+  const highCount = todaySamples.filter(sample => sample.bpm > limit).length;
   document.getElementById("chartInfo").textContent =
     "Metingen vandaag: " + todaySamples.length +
     " | laatste: " + latest + " bpm" +
     " | boven grens: " + highCount;
 }
 
-
 // ============================================================
-// STARTUP
+// START
 // ============================================================
 
 window.addEventListener("resize", drawChart);
@@ -1434,23 +1485,25 @@ setInterval(updateStorageEstimate, 60000);
 setTimeout(drawChart, 500);
 
 window.addEventListener("load", async () => {
+  document.getElementById("softwareVersionInfo").textContent =
+    "Softwareversie: " + SOFTWARE_VERSION;
+
   try {
     await registerServiceWorker();
-  } catch (e) {
-    log("Service worker startup fout: " + e);
+  } catch (error) {
+    log("Service worker startup fout: " + error);
   }
 
   try {
     await openIndexedDb();
     log("IndexedDB geopend");
     await loadTodayFromIndexedDb();
-  } catch (e) {
-    setDbInfo("open fout: " + e, "bad");
-    log("IndexedDB open FOUT: " + e);
+  } catch (error) {
+    setDbInfo("open fout: " + error, "bad");
+    log("IndexedDB open FOUT: " + error);
   }
 
   await updateStorageEstimate();
-
   updateLastDeviceInfo();
   requestScreenWakeLock();
 
