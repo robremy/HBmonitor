@@ -18,7 +18,7 @@ Deze Progressive Web App functioneert offline in Chrome:
 ## Installatie 
 
 - https://robremy.github.io/HBmonitor
-  Chrome > Toevoegen aan startscherm > Installeren
+  Chrome menu → Toevoegen aan startscherm → Installeren
 
 ## Xiaomi Band
 
