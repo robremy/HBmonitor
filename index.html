@@ -182,7 +182,7 @@
 
     <div class="small">
       Chrome doet Web Bluetooth, alarm, grafiek en opslag zelf.
-      Metingen worden lokaal opgeslagen in IndexedDB. Default alarmgrens: 76 bpm. Alarm gaat af bij hoger dan 76.
+      Metingen worden lokaal opgeslagen in IndexedDB. Default alarmgrens: 76 bpm. Dit is alleen een bovengrens: het alarm gaat af bij een hartslag hoger dan 76 bpm.
     </div>
   </div>
 
@@ -1151,7 +1151,7 @@ function checkAlarm(bpm) {
     }
 
     const highFor = Math.round((now - aboveSince) / 1000);
-    setStatus("Boven grens: " + highFor + " sec", "warn");
+    setStatus("Alarmstatus: hartslag boven alarmgrens (" + limit + " bpm) gedurende " + highFor + " sec", "warn");
 
     if ((now - aboveSince) >= requiredMs) {
       if ((now - lastAlarm) >= getCooldownMs()) {
@@ -1161,7 +1161,7 @@ function checkAlarm(bpm) {
     }
   } else {
     aboveSince = null;
-    setStatus("Onder grens", "ok");
+    setStatus("Alarmstatus: hartslag onder alarmgrens (" + limit + " bpm)", "ok");
     document.getElementById("mainCard").className = "card";
   }
 }
