@@ -1,68 +1,111 @@
 /*
  * HB Monitor PWA service worker
  *
- * Updategedrag:
- * - De eerste overgang vanaf de oude v1-serviceworker activeert automatisch.
- * - Vanaf deze versie blijft een nieuwe serviceworker wachten.
- * - De app toont dan een balk: "Nieuwe versie beschikbaar".
- * - "Nu bijwerken" activeert de wachtende versie en herlaadt de app.
- * - Bij een actieve Bluetooth-meting volgt eerst een waarschuwing.
- * - De huidige softwareversie wordt onder de PWA-status weergegeven.
+ * Wijzig APP_VERSION bij iedere nieuwe release.
+ * Gebruik in index.html dezelfde SOFTWARE_VERSION.
  */
 
-const APP_VERSION = "2026.07.12-v3";
-const CACHE_NAME = `xiaomi-band10-hr-pwa-${APP_VERSION}`;
-const LEGACY_CACHE_NAME = "xiaomi-band10-hr-pwa-v1";
+const APP_VERSION = "2026.07.12-v4";
+const CACHE_PREFIX = "xiaomi-band10-hr-pwa-";
+const CACHE_NAME = CACHE_PREFIX + APP_VERSION;
 const OFFLINE_PAGE = "./index.html";
 
-const STATIC_FILES = [
+const APP_FILES = [
+  "./",
+  "./index.html",
   "./manifest.webmanifest",
   "./icon-192.png",
   "./icon-512.png"
 ];
 
-const UPDATE_BOOTSTRAP_MARKER = "hbmonitor-pwa-update-bootstrap";
+self.addEventListener("install", event => {
+  event.waitUntil((async () => {
+    const cache = await caches.open(CACHE_NAME);
+    await cache.addAll(APP_FILES);
+  })());
+});
 
+self.addEventListener("activate", event => {
+  event.waitUntil((async () => {
+    const cacheNames = await caches.keys();
 
-function hbMonitorUpdateBootstrap(softwareVersion) {
-  "use strict";
+    await Promise.all(
+      cacheNames
+        .filter(cacheName =>
+          cacheName.startsWith(CACHE_PREFIX) &&
+          cacheName !== CACHE_NAME
+        )
+        .map(cacheName => caches.delete(cacheName))
+    );
 
-  if (window.__hbMonitorUpdaterLoaded) {
+    await self.clients.claim();
+  })());
+});
+
+self.addEventListener("message", event => {
+  if (event.data && event.data.type === "SKIP_WAITING") {
+    self.skipWaiting();
+  }
+});
+
+async function handleNavigation(request) {
+  try {
+    const networkResponse = await fetch(request, {
+      cache: "no-store"
+    });
+
+    if (networkResponse.ok) {
+      const cache = await caches.open(CACHE_NAME);
+      await cache.put(OFFLINE_PAGE, networkResponse.clone());
+    }
+
+    return networkResponse;
+  } catch (_) {
+    const cachedPage = await caches.match(OFFLINE_PAGE);
+    return cachedPage || Response.error();
+  }
+}
+
+async function handleStaticRequest(request, event) {
+  const cachedResponse = await caches.match(request);
+
+  const networkPromise = fetch(request)
+    .then(async response => {
+      if (response && response.ok) {
+        const cache = await caches.open(CACHE_NAME);
+        await cache.put(request, response.clone());
+      }
+
+      return response;
+    })
+    .catch(() => null);
+
+  if (cachedResponse) {
+    event.waitUntil(networkPromise);
+    return cachedResponse;
+  }
+
+  const networkResponse = await networkPromise;
+  return networkResponse || Response.error();
+}
+
+self.addEventListener("fetch", event => {
+  const request = event.request;
+
+  if (request.method !== "GET") {
     return;
   }
 
-  window.__hbMonitorUpdaterLoaded = true;
+  const requestUrl = new URL(request.url);
 
-  let registration = null;
-  let waitingWorker = null;
-  let reloading = false;
-  let dismissedForSession = false;
-  let lastUpdateCheck = 0;
-
-
-  function logUpdate(message) {
-    try {
-      if (typeof log === "function") {
-        log(message);
-      } else {
-        console.log("HB Monitor update:", message);
-      }
-    } catch (_) {
-      console.log("HB Monitor update:", message);
-    }
+  if (requestUrl.origin !== self.location.origin) {
+    return;
   }
 
+  if (request.mode === "navigate") {
+    event.respondWith(handleNavigation(request));
+    return;
+  }
 
-  function displaySoftwareVersion() {
-    let versionElement =
-      document.getElementById("softwareVersionInfo");
-
-    if (!versionElement) {
-      versionElement = document.createElement("div");
-      versionElement.id = "softwareVersionInfo";
-      versionElement.className = "status";
-
-      const pwaInfo =
-        document.getElementById("pwaInfo");
-
-      if (
+  event.respondWith(handleStaticRequest(request, event));
+});
