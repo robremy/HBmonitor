@@ -186,7 +186,7 @@
     <div id="lastDeviceInfo" class="status"></div>
     <div id="wakeLockInfo" class="status"></div>
     <div id="pwaInfo" class="status">PWA: initialiseren...</div>
-    <div id="softwareVersionInfo" class="status">Softwareversie: 2026.07.12-v4</div>
+    <div id="softwareVersionInfo" class="status">Softwareversie: 2026.07.13-v2</div>
     <div id="updateInfo" class="update-line" role="status" aria-live="polite">
       <strong>Nieuwe softwareversie beschikbaar.</strong><br>
       Werk bij wanneer de hartslagmeting veilig onderbroken kan worden.<br>
@@ -206,7 +206,6 @@
     <button class="red" onclick="testAlarm()">Test alarm</button>
     <button class="gray" onclick="stopVibration()">Stop trillen</button>
     <button id="installBtn" class="purple" onclick="installPwa()" style="display:none;">Installeer app</button>
-    <button class="purple" onclick="requestPersistentStorage()">Opslag permanent maken</button>
 
     <label>
       Alarmgrens bpm:
@@ -229,7 +228,7 @@
     <div class="small">
       Chrome doet Web Bluetooth, alarm, grafiek en opslag zelf.
       Metingen worden lokaal opgeslagen in IndexedDB. De standaard alarmgrens is 76 bpm.
-      Dit is alleen een bovengrens: het alarm gaat af bij een hartslag hoger dan 76 bpm.
+      Dit is een bovengrens: het alarm gaat af bij een hartslag hoger dan 76 bpm.
     </div>
   </div>
 
@@ -262,7 +261,7 @@
 <script>
 "use strict";
 
-const SOFTWARE_VERSION = "2026.07.12-v4";
+const SOFTWARE_VERSION = "2026.07.13-v2";
 
 const HR_SERVICE = "0000180d-0000-1000-8000-00805f9b34fb";
 const HR_MEASUREMENT = "00002a37-0000-1000-8000-00805f9b34fb";
@@ -534,28 +533,43 @@ async function updateStorageEstimate() {
   }
 }
 
-async function requestPersistentStorage() {
+async function ensurePersistentStorage() {
   try {
-    if (!navigator.storage || !navigator.storage.persist) {
+    if (!navigator.storage) {
       setStorageInfo("persistent storage niet ondersteund", "warn");
       log("Persistent storage niet ondersteund");
-      return;
+      return false;
+    }
+
+    if (
+      navigator.storage.persisted &&
+      await navigator.storage.persisted()
+    ) {
+      log("Persistent storage was al actief");
+      return true;
+    }
+
+    if (!navigator.storage.persist) {
+      setStorageInfo("persistent storage niet ondersteund", "warn");
+      log("Persistent storage niet ondersteund");
+      return false;
     }
 
     const granted = await navigator.storage.persist();
 
     if (granted) {
-      setStorageInfo("persistent storage toegestaan", "ok");
-      log("Persistent storage toegestaan");
+      setStorageInfo("persistent storage actief", "ok");
+      log("Persistent storage automatisch toegestaan");
     } else {
       setStorageInfo("persistent storage niet toegestaan", "warn");
-      log("Persistent storage niet toegestaan door browser");
+      log("Persistent storage automatisch aangevraagd, maar niet toegestaan door browser");
     }
 
-    await updateStorageEstimate();
+    return granted;
   } catch (error) {
     setStorageInfo("persistent storage fout: " + error, "bad");
     log("Persistent storage FOUT: " + error);
+    return false;
   }
 }
 
@@ -1493,6 +1507,8 @@ window.addEventListener("load", async () => {
   } catch (error) {
     log("Service worker startup fout: " + error);
   }
+
+  await ensurePersistentStorage();
 
   try {
     await openIndexedDb();
