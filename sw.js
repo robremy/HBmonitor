@@ -1,66 +1,28 @@
 /*
  * HB Monitor PWA service worker
  *
- * Deze versie voegt features.js aan index.html toe, zodat de nieuwe
- * gegevensfuncties ook offline beschikbaar zijn zonder index.html te wijzigen.
+ * Wijzig APP_VERSION bij iedere nieuwe release.
+ * Gebruik in index.html dezelfde SOFTWARE_VERSION.
  */
 
-const APP_VERSION = "2026.07.14-v1";
+const APP_VERSION = "2026.07.13-v2";
 const CACHE_PREFIX = "xiaomi-band10-hr-pwa-";
 const CACHE_NAME = CACHE_PREFIX + APP_VERSION;
 const OFFLINE_PAGE = "./index.html";
-const FEATURE_SCRIPT = "./features.js";
 
-const STATIC_FILES = [
+const APP_FILES = [
+  "./",
+  "./index.html",
   "./manifest.webmanifest",
   "./icon-192.png",
-  "./icon-512.png",
-  FEATURE_SCRIPT
+  "./icon-512.png"
 ];
 
-async function addFeatureScript(response) {
-  if (!response || !response.ok) {
-    return response;
-  }
-
-  const contentType = response.headers.get("content-type") || "";
-  if (!contentType.includes("text/html")) {
-    return response;
-  }
-
-  let html = await response.text();
-
-  if (!html.includes("features.js")) {
-    const scriptTag = '<script src="./features.js"></script>';
-    html = html.includes("</body>")
-      ? html.replace("</body>", "  " + scriptTag + "\n</body>")
-      : html + "\n" + scriptTag;
-  }
-
-  const headers = new Headers(response.headers);
-  headers.delete("content-length");
-  headers.delete("content-encoding");
-
-  return new Response(html, {
-    status: response.status,
-    statusText: response.statusText,
-    headers
-  });
-}
-
-async function cacheAppShell() {
-  const cache = await caches.open(CACHE_NAME);
-  await cache.addAll(STATIC_FILES);
-
-  const networkPage = await fetch(OFFLINE_PAGE, { cache: "reload" });
-  const enhancedPage = await addFeatureScript(networkPage);
-
-  await cache.put(OFFLINE_PAGE, enhancedPage.clone());
-  await cache.put("./", enhancedPage.clone());
-}
-
 self.addEventListener("install", event => {
-  event.waitUntil(cacheAppShell());
+  event.waitUntil((async () => {
+    const cache = await caches.open(CACHE_NAME);
+    await cache.addAll(APP_FILES);
+  })());
 });
 
 self.addEventListener("activate", event => {
@@ -92,14 +54,12 @@ async function handleNavigation(request) {
       cache: "no-store"
     });
 
-    if (!networkResponse.ok) {
-      return networkResponse;
+    if (networkResponse.ok) {
+      const cache = await caches.open(CACHE_NAME);
+      await cache.put(OFFLINE_PAGE, networkResponse.clone());
     }
 
-    const enhancedResponse = await addFeatureScript(networkResponse);
-    const cache = await caches.open(CACHE_NAME);
-    await cache.put(OFFLINE_PAGE, enhancedResponse.clone());
-    return enhancedResponse;
+    return networkResponse;
   } catch (_) {
     const cachedPage = await caches.match(OFFLINE_PAGE);
     return cachedPage || Response.error();
