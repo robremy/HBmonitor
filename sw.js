@@ -5,7 +5,7 @@
  * Gebruik in index.html dezelfde SOFTWARE_VERSION.
  */
 
-const APP_VERSION = "2026.07.15-v2";
+const APP_VERSION = "2026.07.15-v3";
 const CACHE_PREFIX = "xiaomi-band10-hr-pwa-";
 const CACHE_NAME = CACHE_PREFIX + APP_VERSION;
 const OFFLINE_PAGE = "./index.html";
@@ -20,6 +20,7 @@ const APP_FILES = [
 ];
 
 self.addEventListener("install", event => {
+  self.skipWaiting();
   event.waitUntil((async () => {
     const cache = await caches.open(CACHE_NAME);
     await cache.addAll(APP_FILES);

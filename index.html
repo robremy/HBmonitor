@@ -186,7 +186,7 @@
     <div id="lastDeviceInfo" class="status"></div>
     <div id="wakeLockInfo" class="status"></div>
     <div id="pwaInfo" class="status">PWA: initialiseren...</div>
-    <div id="softwareVersionInfo" class="status">Softwareversie: 2026.07.14-v1</div>
+    <div id="softwareVersionInfo" class="status">Softwareversie: 2026.07.15-v3</div>
     <div id="updateInfo" class="update-line" role="status" aria-live="polite">
       <strong>Nieuwe softwareversie beschikbaar.</strong><br>
       Werk bij wanneer de hartslagmeting veilig onderbroken kan worden.<br>
@@ -261,12 +261,13 @@
 <script>
 "use strict";
 
-const SOFTWARE_VERSION = "2026.07.15-v2";
+const SOFTWARE_VERSION = "2026.07.15-v3";
 
 const HR_SERVICE = "0000180d-0000-1000-8000-00805f9b34fb";
 const HR_MEASUREMENT = "00002a37-0000-1000-8000-00805f9b34fb";
 
 const STORAGE_LAST_NAME = "xiaomi_band10_last_device_name_pwa_v1";
+const STORAGE_LAST_ID = "xiaomi_band10_last_device_id_pwa_v1";
 const DB_NAME = "xiaomi_band10_heart_rate_db";
 const DB_VERSION = 1;
 const STORE_NAME = "samples";
@@ -291,7 +292,10 @@ let manualDisconnect = false;
 let reconnectTimer = null;
 let reconnectAttempt = 0;
 let reconnectInProgress = false;
+let lastHeartRateAt = 0;
+let hiddenAt = 0;
 const RECONNECT_MAX_DELAY_MS = 30000;
+const STALE_DATA_MS = 12000;
 
 function getDayKey(date) {
   return date.getFullYear() + "-" +
@@ -926,6 +930,9 @@ function saveLastDevice(selectedDevice) {
 
     const name = selectedDevice.name || "onbekend";
     localStorage.setItem(STORAGE_LAST_NAME, name);
+    if (selectedDevice.id) {
+      localStorage.setItem(STORAGE_LAST_ID, selectedDevice.id);
+    }
     updateLastDeviceInfo();
     log("Band onthouden: " + name);
   } catch (error) {
@@ -1068,21 +1075,62 @@ async function connectLastBand() {
   }
 }
 
+async function findPreviouslyPermittedDevice() {
+  if (!("getDevices" in navigator.bluetooth)) {
+    return null;
+  }
+
+  const permittedDevices = await navigator.bluetooth.getDevices();
+  const lastId = localStorage.getItem(STORAGE_LAST_ID);
+  const lastName = localStorage.getItem(STORAGE_LAST_NAME);
+
+  return permittedDevices.find(item => lastId && item.id === lastId) ||
+    permittedDevices.find(item => lastName && item.name === lastName) ||
+    permittedDevices.find(item => item.name && item.name.includes("Xiaomi")) ||
+    null;
+}
+
+async function restoreDeviceReference() {
+  if (device) {
+    return device;
+  }
+
+  try {
+    device = await findPreviouslyPermittedDevice();
+    if (device) {
+      device.removeEventListener("gattserverdisconnected", onDisconnected);
+      device.addEventListener("gattserverdisconnected", onDisconnected);
+      log("Eerder toegestane band teruggevonden zonder Bluetooth-kiezer");
+      updateLastDeviceInfo();
+    }
+  } catch (error) {
+    log("Eerder toegestane band opzoeken mislukt: " + error);
+  }
+
+  return device;
+}
+
 async function autoConnectLastBandOnStartup() {
   await requestScreenWakeLock();
   updateLastDeviceInfo();
 
   const lastName = localStorage.getItem(STORAGE_LAST_NAME);
-
   if (!lastName) {
     log("Geen laatst verbonden band bekend. Eerste keer: druk op Verbinden.");
     setStatus("Druk op Verbinden.", "warn");
     return;
   }
 
-  log("Laatst gebruikte band bekend: " + lastName);
-  log("Druk op Gebruik laatst verbonden band en kies de band opnieuw.");
-  setStatus("Druk op Gebruik laatst verbonden band.", "warn");
+  const restored = await restoreDeviceReference();
+  if (!restored) {
+    log("Bandtoestemming niet automatisch teruggevonden. Druk eenmaal op Gebruik laatst verbonden band.");
+    setStatus("Druk eenmaal op Gebruik laatst verbonden band.", "warn");
+    return;
+  }
+
+  manualDisconnect = false;
+  log("Automatisch verbinden met eerder toegestane band...");
+  scheduleReconnect(true);
 }
 
 async function connectToDevice(selectedDevice, storeDevice) {
@@ -1154,15 +1202,32 @@ function scheduleReconnect(immediate = false) {
   }, delay);
 }
 
-async function reconnectBand() {
-  if (manualDisconnect || !device || reconnectInProgress) {
+async function reconnectBand(forceReset = false) {
+  if (manualDisconnect || reconnectInProgress) {
     return;
   }
 
-  if (device.gatt && device.gatt.connected && characteristic) {
+  await restoreDeviceReference();
+  if (!device) {
+    log("Automatisch opnieuw verbinden niet mogelijk: geen eerder toegestaan apparaat gevonden");
+    setStatus("Druk eenmaal op Gebruik laatst verbonden band.", "warn");
+    return;
+  }
+
+  const dataIsStale = lastHeartRateAt > 0 && (Date.now() - lastHeartRateAt) > STALE_DATA_MS;
+
+  if (!forceReset && device.gatt && device.gatt.connected && characteristic && !dataIsStale) {
     reconnectAttempt = 0;
     setStatus("Verbonden", "ok");
     return;
+  }
+
+  if (device.gatt && device.gatt.connected && (forceReset || dataIsStale)) {
+    log("Bluetooth lijkt verbonden maar geeft geen nieuwe hartslag; verbinding wordt opnieuw opgebouwd");
+    try { device.gatt.disconnect(); } catch (_) {}
+    characteristic = null;
+    server = null;
+    await new Promise(resolve => setTimeout(resolve, 800));
   }
 
   reconnectInProgress = true;
@@ -1219,23 +1284,32 @@ function onDisconnected() {
     return;
   }
 
-  log("Bluetooth verbinding onverwacht verbroken");
+  log("Bluetooth verbinding onverwacht verbroken; automatisch herstel gestart");
   document.getElementById("contact").textContent = "Verbinding verbroken";
   setStatus("Verbinding verbroken. Automatisch herstel gestart.", "bad");
-  scheduleReconnect(false);
+  scheduleReconnect(true);
 }
 
-document.addEventListener("visibilitychange", () => {
+document.addEventListener("visibilitychange", async () => {
   if (document.visibilityState !== "visible") {
+    hiddenAt = Date.now();
     return;
   }
 
   requestScreenWakeLock();
+  await restoreDeviceReference();
 
-  if (!manualDisconnect && device && (!device.gatt.connected || !characteristic)) {
-    log("App weer actief; Bluetooth-verbinding controleren");
+  if (manualDisconnect || !device) {
+    return;
+  }
+
+  const wasHiddenLongEnough = hiddenAt > 0 && (Date.now() - hiddenAt) > 3000;
+  const noRecentData = lastHeartRateAt === 0 || (Date.now() - lastHeartRateAt) > STALE_DATA_MS;
+
+  if (!device.gatt.connected || !characteristic || (wasHiddenLongEnough && noRecentData)) {
+    log("App weer actief; Bluetooth-verbinding geforceerd herstellen");
     cancelReconnect();
-    scheduleReconnect(true);
+    await reconnectBand(true);
   }
 });
 
@@ -1273,6 +1347,7 @@ function parseHeartRate(value) {
 
 async function onHeartRate(event) {
   checkNewDay();
+  lastHeartRateAt = Date.now();
 
   const parsed = parseHeartRate(event.target.value);
   document.getElementById("bpm").textContent = parsed.bpm;
