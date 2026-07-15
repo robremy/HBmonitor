@@ -261,7 +261,7 @@
 <script>
 "use strict";
 
-const SOFTWARE_VERSION = "2026.07.14-v1";
+const SOFTWARE_VERSION = "2026.07.15-v2";
 
 const HR_SERVICE = "0000180d-0000-1000-8000-00805f9b34fb";
 const HR_MEASUREMENT = "00002a37-0000-1000-8000-00805f9b34fb";
@@ -287,6 +287,11 @@ let deferredInstallPrompt = null;
 let waitingServiceWorker = null;
 let reloadingAfterUpdate = false;
 let serviceWorkerRegistration = null;
+let manualDisconnect = false;
+let reconnectTimer = null;
+let reconnectAttempt = 0;
+let reconnectInProgress = false;
+const RECONNECT_MAX_DELAY_MS = 30000;
 
 function getDayKey(date) {
   return date.getFullYear() + "-" +
@@ -986,6 +991,8 @@ async function requestScreenWakeLock() {
 
 async function connectBand() {
   try {
+    manualDisconnect = false;
+    cancelReconnect();
     await requestScreenWakeLock();
 
     if (!navigator.bluetooth) {
@@ -1013,6 +1020,8 @@ async function connectBand() {
 
 async function connectLastBand() {
   try {
+    manualDisconnect = false;
+    cancelReconnect();
     await requestScreenWakeLock();
 
     if (!navigator.bluetooth) {
@@ -1081,20 +1090,31 @@ async function connectToDevice(selectedDevice, storeDevice) {
     throw new Error("Geen device opgegeven");
   }
 
+  device = selectedDevice;
+  manualDisconnect = false;
+
   document.getElementById("deviceName").textContent =
     "Device: " + (selectedDevice.name || "onbekend");
 
+  selectedDevice.removeEventListener("gattserverdisconnected", onDisconnected);
   selectedDevice.addEventListener("gattserverdisconnected", onDisconnected);
   log("Verbinden met " + (selectedDevice.name || "onbekend") + "...");
-  server = await selectedDevice.gatt.connect();
+  server = selectedDevice.gatt.connected
+    ? selectedDevice.gatt
+    : await selectedDevice.gatt.connect();
 
   log("Heart Rate Service zoeken...");
   const service = await server.getPrimaryService(HR_SERVICE);
 
   log("Heart Rate Measurement characteristic zoeken...");
   characteristic = await service.getCharacteristic(HR_MEASUREMENT);
+  characteristic.removeEventListener("characteristicvaluechanged", onHeartRate);
   characteristic.addEventListener("characteristicvaluechanged", onHeartRate);
   await characteristic.startNotifications();
+
+  reconnectAttempt = 0;
+  reconnectInProgress = false;
+  cancelReconnect();
 
   if (storeDevice) {
     saveLastDevice(selectedDevice);
@@ -1106,8 +1126,69 @@ async function connectToDevice(selectedDevice, storeDevice) {
   setStatus("Verbonden. Wacht op hartslag...", "ok");
 }
 
+function cancelReconnect() {
+  if (reconnectTimer !== null) {
+    clearTimeout(reconnectTimer);
+    reconnectTimer = null;
+  }
+}
+
+function scheduleReconnect(immediate = false) {
+  if (manualDisconnect || !device || reconnectTimer !== null || reconnectInProgress) {
+    return;
+  }
+
+  const delay = immediate
+    ? 0
+    : Math.min(2000 * Math.pow(2, reconnectAttempt), RECONNECT_MAX_DELAY_MS);
+
+  const seconds = Math.max(1, Math.ceil(delay / 1000));
+  setStatus(
+    immediate ? "Opnieuw verbinden..." : "Verbinding verbroken. Nieuwe poging over " + seconds + " s...",
+    "warn"
+  );
+
+  reconnectTimer = setTimeout(async () => {
+    reconnectTimer = null;
+    await reconnectBand();
+  }, delay);
+}
+
+async function reconnectBand() {
+  if (manualDisconnect || !device || reconnectInProgress) {
+    return;
+  }
+
+  if (device.gatt && device.gatt.connected && characteristic) {
+    reconnectAttempt = 0;
+    setStatus("Verbonden", "ok");
+    return;
+  }
+
+  reconnectInProgress = true;
+  reconnectAttempt += 1;
+  log("Automatisch opnieuw verbinden, poging " + reconnectAttempt + "...");
+  setStatus("Opnieuw verbinden, poging " + reconnectAttempt + "...", "warn");
+
+  try {
+    await connectToDevice(device, false);
+    log("Bluetooth automatisch opnieuw verbonden");
+    setStatus("Opnieuw verbonden. Wacht op hartslag...", "ok");
+  } catch (error) {
+    reconnectInProgress = false;
+    characteristic = null;
+    server = null;
+    log("Automatisch opnieuw verbinden mislukt: " + error);
+    scheduleReconnect(false);
+  }
+}
+
 function disconnectBand() {
   try {
+    manualDisconnect = true;
+    reconnectInProgress = false;
+    reconnectAttempt = 0;
+    cancelReconnect();
     stopVibration();
 
     if (characteristic) {
@@ -1121,6 +1202,7 @@ function disconnectBand() {
     characteristic = null;
     server = null;
     log("Verbinding handmatig verbroken");
+    setStatus("Verbinding handmatig verbroken", "warn");
   } catch (error) {
     log("Fout bij verbreken: " + error);
   }
@@ -1130,11 +1212,39 @@ function onDisconnected() {
   stopVibration();
   characteristic = null;
   server = null;
-  log("Bluetooth verbinding verbroken");
-  document.getElementById("contact").textContent = "Verbinding verbroken";
-  setStatus("Verbinding verbroken", "bad");
   aboveSince = null;
+
+  if (manualDisconnect) {
+    log("Bluetooth verbinding handmatig verbroken");
+    return;
+  }
+
+  log("Bluetooth verbinding onverwacht verbroken");
+  document.getElementById("contact").textContent = "Verbinding verbroken";
+  setStatus("Verbinding verbroken. Automatisch herstel gestart.", "bad");
+  scheduleReconnect(false);
 }
+
+document.addEventListener("visibilitychange", () => {
+  if (document.visibilityState !== "visible") {
+    return;
+  }
+
+  requestScreenWakeLock();
+
+  if (!manualDisconnect && device && (!device.gatt.connected || !characteristic)) {
+    log("App weer actief; Bluetooth-verbinding controleren");
+    cancelReconnect();
+    scheduleReconnect(true);
+  }
+});
+
+window.addEventListener("online", () => {
+  if (!manualDisconnect && device && (!device.gatt.connected || !characteristic)) {
+    cancelReconnect();
+    scheduleReconnect(true);
+  }
+});
 
 function parseHeartRate(value) {
   const flags = value.getUint8(0);

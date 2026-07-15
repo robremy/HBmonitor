@@ -30,3 +30,9 @@ Settings → Share HR → On
 
 Alle hartslagmetingen blijven lokaal in Chrome IndexedDB op het apparaat.
 Gebruik "Download CSV vandaag" om data te exporteren.
+
+## Versie 2026.07.15-v2
+
+- Automatisch opnieuw verbinden na een onverwachte Web Bluetooth-verbreking.
+- Bij terugkeer uit het lock screen controleert de app direct de verbinding en probeert deze te herstellen.
+- Handmatig verbreken start geen automatische reconnect.
