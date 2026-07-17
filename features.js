@@ -1,6 +1,6 @@
 /*
  * HBmonitor gegevensbeheer en historische grafieken
- * Versie: 2026.07.15-v3
+ * Versie: 2026.07.17-v1
  *
  * Functies:
  * - Export van alle opgeslagen dagen naar één CSV-bestand
@@ -11,7 +11,7 @@
 "use strict";
 
 (() => {
-  const FEATURE_VERSION = "2026.07.15-v3";
+  const FEATURE_VERSION = "2026.07.17-v1";
   const CSV_HEADERS = [
     "id",
     "ts_ms",
@@ -109,6 +109,7 @@
     }
 
     updateGraphLabels();
+    drawRecentDayCharts();
   };
 
   function mapStoredRowsForGraph(rows) {
@@ -119,6 +120,203 @@
       alarm_limit: sample.alarm_limit,
       above_limit: sample.above_limit
     }));
+  }
+
+
+  const RECENT_DAY_COUNT = 4;
+  const recentDaySamples = new Map();
+  let recentChartsLoadPromise = null;
+
+  function dateKeyDaysAgo(daysAgo) {
+    const date = new Date();
+    date.setHours(12, 0, 0, 0);
+    date.setDate(date.getDate() - daysAgo);
+    return getDayKey(date);
+  }
+
+  function formatDayTitle(dateKey, daysAgo) {
+    const date = new Date(dateKey + "T12:00:00");
+    const label = date.toLocaleDateString("nl-NL", {
+      weekday: "long",
+      day: "2-digit",
+      month: "2-digit"
+    });
+    return daysAgo === 0
+      ? "Hartslaggrafiek vandaag — " + label
+      : "Hartslaggrafiek " + label;
+  }
+
+  function createRecentCharts() {
+    if (document.getElementById("recentDayCharts")) {
+      return;
+    }
+
+    const mainCanvas = document.getElementById("hrChart");
+    const mainCard = mainCanvas ? mainCanvas.closest(".card") : null;
+    if (!mainCard) {
+      return;
+    }
+
+    const mainTitle = mainCard.querySelector("b");
+    if (mainTitle) {
+      mainTitle.textContent = formatDayTitle(dateKeyDaysAgo(0), 0);
+    }
+
+    const container = document.createElement("div");
+    container.id = "recentDayCharts";
+
+    for (let daysAgo = 1; daysAgo < RECENT_DAY_COUNT; daysAgo += 1) {
+      const dateKey = dateKeyDaysAgo(daysAgo);
+      const card = document.createElement("div");
+      card.className = "card";
+      card.innerHTML = `
+        <b>${formatDayTitle(dateKey, daysAgo)}</b>
+        <canvas id="hrChartDay${daysAgo}"></canvas>
+        <div class="status">
+          <span id="chartInfoDay${daysAgo}">Metingen laden...</span>
+        </div>
+      `;
+      container.appendChild(card);
+    }
+
+    mainCard.insertAdjacentElement("afterend", container);
+  }
+
+  function drawSamplesOnCanvas(canvas, info, samples, dateKey) {
+    if (!canvas || !info) {
+      return;
+    }
+
+    const context = canvas.getContext("2d");
+    const size = resizeCanvas(canvas);
+    const { width, height, ratio } = size;
+    const padLeft = 44 * ratio;
+    const padRight = 12 * ratio;
+    const padTop = 18 * ratio;
+    const padBottom = 34 * ratio;
+    const chartWidth = width - padLeft - padRight;
+    const chartHeight = height - padTop - padBottom;
+
+    context.clearRect(0, 0, width, height);
+    context.fillStyle = "#101010";
+    context.fillRect(0, 0, width, height);
+    context.strokeStyle = "#333333";
+    context.lineWidth = 1 * ratio;
+    context.strokeRect(padLeft, padTop, chartWidth, chartHeight);
+    context.font = `${12 * ratio}px monospace`;
+    context.fillStyle = "#bbbbbb";
+
+    if (!samples || samples.length < 2) {
+      context.fillText(
+        "Nog onvoldoende metingen voor grafiek",
+        padLeft + 10 * ratio,
+        padTop + 30 * ratio
+      );
+      info.textContent = "Geen of onvoldoende metingen voor " + dateKey + ".";
+      return;
+    }
+
+    const plotted = downsampleSamples(samples, 4000);
+    const limit = getLimit();
+    let minBpm = Math.min(...plotted.map(sample => sample.bpm), limit);
+    let maxBpm = Math.max(...plotted.map(sample => sample.bpm), limit);
+    minBpm = Math.max(30, Math.floor((minBpm - 5) / 5) * 5);
+    maxBpm = Math.min(220, Math.ceil((maxBpm + 5) / 5) * 5);
+    if (maxBpm <= minBpm) {
+      maxBpm = minBpm + 10;
+    }
+
+    const startTime = plotted[0].time;
+    const endTime = plotted[plotted.length - 1].time;
+    const timeSpan = Math.max(1, endTime - startTime);
+    const xFor = time => padLeft + ((time - startTime) / timeSpan) * chartWidth;
+    const yFor = bpm => padTop + (1 - ((bpm - minBpm) / (maxBpm - minBpm))) * chartHeight;
+
+    context.strokeStyle = "#2b2b2b";
+    context.lineWidth = 1 * ratio;
+    context.fillStyle = "#bbbbbb";
+    for (let index = 0; index <= 4; index += 1) {
+      const bpm = minBpm + ((maxBpm - minBpm) / 4) * index;
+      const y = yFor(bpm);
+      context.beginPath();
+      context.moveTo(padLeft, y);
+      context.lineTo(padLeft + chartWidth, y);
+      context.stroke();
+      context.fillText(String(Math.round(bpm)), 6 * ratio, y + 4 * ratio);
+    }
+
+    const limitY = yFor(limit);
+    context.strokeStyle = "#ff4444";
+    context.lineWidth = 1.5 * ratio;
+    context.setLineDash([6 * ratio, 5 * ratio]);
+    context.beginPath();
+    context.moveTo(padLeft, limitY);
+    context.lineTo(padLeft + chartWidth, limitY);
+    context.stroke();
+    context.setLineDash([]);
+    context.fillStyle = "#ff7777";
+    context.fillText("grens " + limit, padLeft + 8 * ratio, limitY - 6 * ratio);
+
+    context.lineWidth = 2.5 * ratio;
+    context.lineCap = "round";
+    context.lineJoin = "round";
+    for (let index = 1; index < plotted.length; index += 1) {
+      const previous = plotted[index - 1];
+      const current = plotted[index];
+      context.strokeStyle = current.bpm > limit ? "#f44336" : "#2196f3";
+      context.beginPath();
+      context.moveTo(xFor(previous.time), yFor(previous.bpm));
+      context.lineTo(xFor(current.time), yFor(current.bpm));
+      context.stroke();
+    }
+
+    context.fillStyle = "#bbbbbb";
+    context.font = `${11 * ratio}px monospace`;
+    const firstLabel = new Date(startTime).toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" });
+    const lastLabel = new Date(endTime).toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" });
+    context.fillText(firstLabel, padLeft, height - 10 * ratio);
+    context.fillText(lastLabel, padLeft + chartWidth - 45 * ratio, height - 10 * ratio);
+
+    const latest = plotted[plotted.length - 1].bpm;
+    const highCount = samples.filter(sample => sample.bpm > limit).length;
+    info.textContent =
+      "Metingen " + dateKey + ": " + samples.length +
+      " | laatste: " + latest + " bpm" +
+      " | boven grens: " + highCount;
+  }
+
+  function drawRecentDayCharts() {
+    for (let daysAgo = 1; daysAgo < RECENT_DAY_COUNT; daysAgo += 1) {
+      const dateKey = dateKeyDaysAgo(daysAgo);
+      drawSamplesOnCanvas(
+        document.getElementById("hrChartDay" + daysAgo),
+        document.getElementById("chartInfoDay" + daysAgo),
+        recentDaySamples.get(dateKey) || [],
+        dateKey
+      );
+    }
+  }
+
+  async function loadRecentDayCharts() {
+    if (recentChartsLoadPromise) {
+      return recentChartsLoadPromise;
+    }
+
+    recentChartsLoadPromise = (async () => {
+      createRecentCharts();
+      for (let daysAgo = 1; daysAgo < RECENT_DAY_COUNT; daysAgo += 1) {
+        const dateKey = dateKeyDaysAgo(daysAgo);
+        const rows = await getSamplesByDate(dateKey);
+        recentDaySamples.set(dateKey, mapStoredRowsForGraph(rows));
+      }
+      drawRecentDayCharts();
+    })();
+
+    try {
+      await recentChartsLoadPromise;
+    } finally {
+      recentChartsLoadPromise = null;
+    }
   }
 
   async function loadSelectedDate() {
@@ -594,12 +792,14 @@
 
   setFeatureVersion();
   createInterface();
+  createRecentCharts();
 
-  window.addEventListener("load", () => {
+  window.addEventListener("load", async () => {
     setFeatureVersion();
     createInterface();
     refreshDateBounds();
+    await loadRecentDayCharts();
     drawChart();
-    log("Gegevensfuncties actief: CSV alle dagen, CSV-import en historische datums");
+    log("Gegevensfuncties actief: vier daggrafieken, CSV alle dagen, CSV-import en historische datums");
   });
 })();
