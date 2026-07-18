@@ -231,7 +231,7 @@
     <div id="lastDeviceInfo" class="status"></div>
     <div id="wakeLockInfo" class="status">Screen wakelock: niet actief</div>
     <div id="pwaInfo" class="status">PWA: initialiseren...</div>
-    <div id="softwareVersionInfo" class="status">Softwareversie: 2026.07.18-v6</div>
+    <div id="softwareVersionInfo" class="status">Softwareversie: 2026.07.18-v7</div>
     <div id="updateInfo" class="update-line" role="status" aria-live="polite">
       <strong>Nieuwe softwareversie beschikbaar.</strong><br>
       Werk bij wanneer de hartslagmeting veilig onderbroken kan worden.<br>
@@ -306,7 +306,7 @@
 <script>
 "use strict";
 
-const SOFTWARE_VERSION = "2026.07.18-v6";
+const SOFTWARE_VERSION = "2026.07.18-v7";
 
 const HR_SERVICE = "0000180d-0000-1000-8000-00805f9b34fb";
 const HR_MEASUREMENT = "00002a37-0000-1000-8000-00805f9b34fb";
@@ -1622,7 +1622,7 @@ function resizeCanvas(canvas) {
 
 function getChartState(canvas) {
   if (!canvas.__heartRateChartState) {
-    canvas.__heartRateChartState = { zoom: 1, center: 0.5 };
+    canvas.__heartRateChartState = { zoom: 1, center: 0.5, inspectTime: null };
   }
   return canvas.__heartRateChartState;
 }
@@ -1759,6 +1759,83 @@ function drawHeartRateCanvas(canvas, infoElement, sourceSamples, dateKey, isToda
   }
   context.restore();
 
+  canvas.__heartRateChartGeometry = {
+    padLeft,
+    padRight,
+    padTop,
+    padBottom,
+    chartWidth,
+    chartHeight,
+    visibleStart,
+    visibleEnd,
+    visibleSpan,
+    fullStart,
+    fullEnd,
+    ratio,
+    samples: allSamples,
+    minBpm,
+    maxBpm
+  };
+
+  if (state.inspectTime != null) {
+    const visibleSamples = allSamples.filter(sample => sample.time >= visibleStart && sample.time <= visibleEnd);
+    if (visibleSamples.length) {
+      let nearest = visibleSamples[0];
+      for (const sample of visibleSamples) {
+        if (Math.abs(sample.time - state.inspectTime) < Math.abs(nearest.time - state.inspectTime)) nearest = sample;
+      }
+
+      const inspectX = xFor(nearest.time);
+      const inspectY = yFor(nearest.bpm);
+      context.save();
+      context.beginPath();
+      context.rect(padLeft, padTop, chartWidth, chartHeight);
+      context.clip();
+      context.strokeStyle = "#eeeeee";
+      context.lineWidth = 1 * ratio;
+      context.setLineDash([4 * ratio, 4 * ratio]);
+      context.beginPath();
+      context.moveTo(inspectX, padTop);
+      context.lineTo(inspectX, padTop + chartHeight);
+      context.stroke();
+      context.setLineDash([]);
+      context.fillStyle = nearest.bpm > limit ? "#f44336" : "#2196f3";
+      context.beginPath();
+      context.arc(inspectX, inspectY, 5 * ratio, 0, Math.PI * 2);
+      context.fill();
+      context.restore();
+
+      const timeText = new Date(nearest.time).toLocaleTimeString([], {
+        hour: "2-digit",
+        minute: "2-digit",
+        second: "2-digit"
+      });
+      const tooltipLines = [
+        timeText,
+        `Hartslag: ${nearest.bpm} bpm`,
+        nearest.bpm > limit ? "Boven grens: ja" : "Boven grens: nee"
+      ];
+      context.font = `${12 * ratio}px monospace`;
+      const textWidth = Math.max(...tooltipLines.map(line => context.measureText(line).width));
+      const boxWidth = textWidth + 18 * ratio;
+      const boxHeight = 58 * ratio;
+      let boxX = inspectX + 10 * ratio;
+      if (boxX + boxWidth > padLeft + chartWidth) boxX = inspectX - boxWidth - 10 * ratio;
+      boxX = Math.max(padLeft + 2 * ratio, Math.min(padLeft + chartWidth - boxWidth - 2 * ratio, boxX));
+      let boxY = inspectY - boxHeight - 10 * ratio;
+      if (boxY < padTop) boxY = inspectY + 10 * ratio;
+      boxY = Math.max(padTop + 2 * ratio, Math.min(padTop + chartHeight - boxHeight - 2 * ratio, boxY));
+
+      context.fillStyle = "rgba(20,20,20,0.94)";
+      context.strokeStyle = "#777777";
+      context.lineWidth = 1 * ratio;
+      context.fillRect(boxX, boxY, boxWidth, boxHeight);
+      context.strokeRect(boxX, boxY, boxWidth, boxHeight);
+      context.fillStyle = "#ffffff";
+      tooltipLines.forEach((line, index) => context.fillText(line, boxX + 9 * ratio, boxY + (17 + index * 16) * ratio));
+    }
+  }
+
   context.fillStyle = "#bbbbbb";
   context.font = `${11 * ratio}px monospace`;
   const scaleText = tickStep === 1800000 ? "30 min" : (tickStep / 3600000) + " uur";
@@ -1782,45 +1859,146 @@ function bindChartInteraction(canvas, redraw) {
   let pinchDistance = 0;
   let startZoom = 1;
   let startCenter = 0.5;
+  let panStartX = null;
+  let panStartCenter = 0.5;
+  let touchStartX = 0;
+  let touchStartY = 0;
+  let inspectTimer = null;
+  let inspecting = false;
 
   const distance = touches => Math.hypot(
     touches[0].clientX - touches[1].clientX,
     touches[0].clientY - touches[1].clientY
   );
 
-  canvas.addEventListener("touchstart", event => {
-    if (event.touches.length !== 2) return;
-    event.preventDefault();
+  const clearInspectTimer = () => {
+    if (inspectTimer) clearTimeout(inspectTimer);
+    inspectTimer = null;
+  };
+
+  const setInspectionFromClientX = clientX => {
+    const geometry = canvas.__heartRateChartGeometry;
+    if (!geometry) return;
+    const rectangle = canvas.getBoundingClientRect();
+    const cssX = clientX - rectangle.left;
+    const ratio = geometry.ratio || 1;
+    const deviceX = cssX * ratio;
+    const position = Math.min(1, Math.max(0, (deviceX - geometry.padLeft) / geometry.chartWidth));
     const state = getChartState(canvas);
-    pinchDistance = distance(event.touches);
-    startZoom = state.zoom;
-    startCenter = state.center;
+    state.inspectTime = geometry.visibleStart + position * geometry.visibleSpan;
+    redraw();
+  };
+
+  canvas.addEventListener("touchstart", event => {
+    const state = getChartState(canvas);
+
+    if (event.touches.length === 2) {
+      event.preventDefault();
+      clearInspectTimer();
+      inspecting = false;
+      state.inspectTime = null;
+      pinchDistance = distance(event.touches);
+      startZoom = state.zoom;
+      startCenter = state.center;
+      panStartX = null;
+      return;
+    }
+
+    if (event.touches.length === 1) {
+      const touch = event.touches[0];
+      touchStartX = touch.clientX;
+      touchStartY = touch.clientY;
+      panStartX = touch.clientX;
+      panStartCenter = state.center;
+      inspecting = false;
+      clearInspectTimer();
+      inspectTimer = setTimeout(() => {
+        inspecting = true;
+        panStartX = null;
+        setInspectionFromClientX(touchStartX);
+        if (navigator.vibrate) navigator.vibrate(15);
+      }, 350);
+    }
   }, { passive: false });
 
   canvas.addEventListener("touchmove", event => {
-    if (event.touches.length !== 2 || !pinchDistance) return;
-    event.preventDefault();
-    const rectangle = canvas.getBoundingClientRect();
-    const midpoint = (event.touches[0].clientX + event.touches[1].clientX) / 2;
-    const focus = Math.min(1, Math.max(0, (midpoint - rectangle.left) / rectangle.width));
-    const nextZoom = Math.min(16, Math.max(1, startZoom * distance(event.touches) / pinchDistance));
-    const oldVisibleStart = startCenter - 0.5 / startZoom;
-    const focalPosition = oldVisibleStart + focus / startZoom;
+    if (event.touches.length === 2 && pinchDistance) {
+      event.preventDefault();
+      const rectangle = canvas.getBoundingClientRect();
+      const midpoint = (event.touches[0].clientX + event.touches[1].clientX) / 2;
+      const focus = Math.min(1, Math.max(0, (midpoint - rectangle.left) / rectangle.width));
+      const nextZoom = Math.min(16, Math.max(1, startZoom * distance(event.touches) / pinchDistance));
+      const oldVisibleStart = startCenter - 0.5 / startZoom;
+      const focalPosition = oldVisibleStart + focus / startZoom;
+      const state = getChartState(canvas);
+      state.zoom = nextZoom;
+      state.center = Math.min(1, Math.max(0, focalPosition + (0.5 - focus) / nextZoom));
+      state.inspectTime = null;
+      redraw();
+      return;
+    }
+
+    if (event.touches.length !== 1) return;
+    const touch = event.touches[0];
+    const moved = Math.hypot(touch.clientX - touchStartX, touch.clientY - touchStartY);
+
+    if (inspecting) {
+      event.preventDefault();
+      setInspectionFromClientX(touch.clientX);
+      return;
+    }
+
+    if (moved > 8) clearInspectTimer();
     const state = getChartState(canvas);
-    state.zoom = nextZoom;
-    state.center = focalPosition + (0.5 - focus) / nextZoom;
-    redraw();
+    if (state.zoom > 1 && panStartX != null) {
+      event.preventDefault();
+      const rectangle = canvas.getBoundingClientRect();
+      const dx = touch.clientX - panStartX;
+      state.center = Math.min(1, Math.max(0, panStartCenter - dx / (rectangle.width * state.zoom)));
+      state.inspectTime = null;
+      redraw();
+    }
   }, { passive: false });
 
   canvas.addEventListener("touchend", event => {
+    clearInspectTimer();
     if (event.touches.length < 2) pinchDistance = 0;
+    if (event.touches.length === 0) {
+      panStartX = null;
+      if (inspecting) {
+        inspecting = false;
+        setTimeout(() => {
+          getChartState(canvas).inspectTime = null;
+          redraw();
+        }, 650);
+      }
+    }
+  });
+
+  canvas.addEventListener("touchcancel", () => {
+    clearInspectTimer();
+    pinchDistance = 0;
+    panStartX = null;
+    inspecting = false;
+    getChartState(canvas).inspectTime = null;
+    redraw();
+  });
+
+  canvas.addEventListener("pointermove", event => {
+    if (event.pointerType === "mouse") setInspectionFromClientX(event.clientX);
+  });
+
+  canvas.addEventListener("pointerleave", event => {
+    if (event.pointerType === "mouse") {
+      getChartState(canvas).inspectTime = null;
+      redraw();
+    }
   });
 }
-
 function resetChartZoom(canvasId) {
   const canvas = document.getElementById(canvasId);
   if (!canvas) return;
-  canvas.__heartRateChartState = { zoom: 1, center: 0.5 };
+  canvas.__heartRateChartState = { zoom: 1, center: 0.5, inspectTime: null };
   if (typeof drawRecentDayCharts === "function") drawRecentDayCharts();
   drawChart();
 }
