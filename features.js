@@ -1,6 +1,6 @@
 /*
  * Heart Rate Alert gegevensbeheer en historische grafieken
- * Versie: 2026.07.18-v12
+ * Versie: 2026.07.18-v13
  *
  * Functies:
  * - Export van alle opgeslagen dagen naar één CSV-bestand
@@ -11,7 +11,7 @@
 "use strict";
 
 (() => {
-  const FEATURE_VERSION = "2026.07.18-v12";
+  const FEATURE_VERSION = "2026.07.18-v13";
   const CSV_HEADERS = [
     "id",
     "ts_ms",
@@ -23,7 +23,8 @@
     "above_limit",
     "contact",
     "device_name",
-    "alarm_mode"
+    "alarm_mode",
+    "annotation"
   ];
 
   let selectedDateKey = getDayKey(new Date());
@@ -114,11 +115,13 @@
 
   function mapStoredRowsForGraph(rows) {
     return downsampleSamples(rows, 4000).map(sample => ({
+      id: sample.id,
       time: sample.ts_ms,
       label: sample.time_label,
       bpm: sample.bpm,
       alarm_limit: sample.alarm_limit,
-      above_limit: sample.above_limit
+      above_limit: sample.above_limit,
+      annotation: sample.annotation || ""
     }));
   }
 
@@ -519,7 +522,8 @@
       above_limit: parseAboveLimit(row.above_limit, bpm, alarmLimit),
       contact: row.contact || "contact onbekend",
       device_name: row.device_name || "geïmporteerd",
-      alarm_mode: row.alarm_mode || "onbekend"
+      alarm_mode: row.alarm_mode || "onbekend",
+      annotation: row.annotation || ""
     };
   }
 

@@ -228,6 +228,45 @@
       font-weight: bold;
     }
 
+    .annotation-dialog {
+      border: 1px solid #555;
+      border-radius: 14px;
+      padding: 0;
+      background: #1b1b1b;
+      color: #fff;
+      width: min(92vw, 420px);
+    }
+
+    .annotation-dialog::backdrop {
+      background: rgba(0, 0, 0, 0.72);
+    }
+
+    .annotation-dialog form {
+      padding: 18px;
+    }
+
+    .annotation-dialog h2 {
+      margin: 0 0 8px;
+      font-size: 22px;
+    }
+
+    .annotation-dialog select {
+      width: 100%;
+      margin: 12px 0;
+      padding: 11px;
+      border-radius: 9px;
+      border: 1px solid #555;
+      background: #111;
+      color: #fff;
+      font-size: 17px;
+    }
+
+    .annotation-actions {
+      display: flex;
+      justify-content: flex-end;
+      gap: 8px;
+    }
+
     .small {
       font-size: 13px;
       color: #aaa;
@@ -248,7 +287,7 @@
     <div id="deviceName" class="status"></div>
     <div id="lastDeviceInfo" class="status"></div>
     <div id="wakeLockInfo" class="status">Screen wakelock: niet actief</div>
-    <div id="softwareVersionInfo" class="status">Softwareversie: 2026.07.18-v12</div>
+    <div id="softwareVersionInfo" class="status">Softwareversie: 2026.07.18-v13</div>
     <div id="updateInfo" class="update-line" role="status" aria-live="polite">
       <strong>Nieuwe softwareversie beschikbaar.</strong><br>
       Werk bij wanneer de hartslagmeting veilig onderbroken kan worden.<br>
@@ -256,7 +295,7 @@
         Nu bijwerken
       </button>
     </div>
-    <div id="dbInfo" class="status">Opgeslagen: -- bpm</div>
+    <div id="dbInfo" class="status">Laatste opslag: --</div>
     <div id="storageInfo" class="status">Opslag: controleren...</div>
   </div>
 
@@ -321,10 +360,33 @@
     </div>
   </div>
 
+  <dialog id="annotationDialog" class="annotation-dialog">
+    <form method="dialog">
+      <h2>Info toevoegen</h2>
+      <div id="annotationPointInfo" class="status"></div>
+      <select id="annotationSelect" aria-label="Extra informatie">
+        <option value="">Geen extra info</option>
+        <option value="Rust">Rust</option>
+        <option value="Lopen">Lopen</option>
+        <option value="Staan">Staan</option>
+        <option value="Eten">Eten</option>
+        <option value="Douchen">Douchen</option>
+        <option value="Stress">Stress</option>
+        <option value="Klachten">Klachten</option>
+        <option value="Medicatie">Medicatie</option>
+        <option value="Overig">Overig</option>
+      </select>
+      <div class="annotation-actions">
+        <button class="gray" value="cancel" type="submit">Annuleren</button>
+        <button id="saveAnnotationButton" value="default" type="button">Opslaan</button>
+      </div>
+    </form>
+  </dialog>
+
 <script>
 "use strict";
 
-const SOFTWARE_VERSION = "2026.07.18-v12";
+const SOFTWARE_VERSION = "2026.07.18-v13";
 
 const HR_SERVICE = "0000180d-0000-1000-8000-00805f9b34fb";
 const HR_MEASUREMENT = "00002a37-0000-1000-8000-00805f9b34fb";
@@ -536,7 +598,7 @@ async function registerServiceWorker() {
   }
 
   try {
-    const registration = await navigator.serviceWorker.register("./sw.js?v=2026.07.18-v12", {
+    const registration = await navigator.serviceWorker.register("./sw.js?v=2026.07.18-v13", {
       scope: "./",
       updateViaCache: "none"
     });
@@ -691,7 +753,14 @@ function openIndexedDb() {
         alert("Nieuwe databaseversie beschikbaar. Sluit en open de app opnieuw.");
       };
 
-      setDbInfo("Opgeslagen: -- bpm", "ok");
+      setDbInfo("Laatste opslag: --", "ok");
+      getLatestSample()
+        .then(sample => {
+          if (sample && sample.ts_ms) {
+            setDbInfo("Laatste opslag: " + formatLastStorageTime(new Date(sample.ts_ms)), "ok");
+          }
+        })
+        .catch(() => {});
       resolve(db);
     };
 
@@ -746,6 +815,20 @@ function getAllSamples() {
     const transaction = db.transaction(STORE_NAME, "readonly");
     const request = transaction.objectStore(STORE_NAME).getAll();
     request.onsuccess = () => resolve(request.result || []);
+    request.onerror = event => reject(event.target.error);
+  });
+}
+
+function getLatestSample() {
+  return new Promise((resolve, reject) => {
+    if (!db) {
+      reject(new Error("IndexedDB is nog niet open"));
+      return;
+    }
+    const transaction = db.transaction(STORE_NAME, "readonly");
+    const index = transaction.objectStore(STORE_NAME).index("ts_ms");
+    const request = index.openCursor(null, "prev");
+    request.onsuccess = event => resolve(event.target.result ? event.target.result.value : null);
     request.onerror = event => reject(event.target.error);
   });
 }
@@ -867,11 +950,13 @@ async function loadTodayFromIndexedDb() {
     const sampled = downsampleSamples(rows, 4000);
 
     todaySamples = sampled.map(sample => ({
+      id: sample.id,
       time: sample.ts_ms,
       label: sample.time_label,
       bpm: sample.bpm,
       alarm_limit: sample.alarm_limit,
-      above_limit: sample.above_limit
+      above_limit: sample.above_limit,
+      annotation: sample.annotation || ""
     }));
 
     drawChart();
@@ -939,7 +1024,8 @@ async function downloadCsvToday() {
       "above_limit",
       "contact",
       "device_name",
-      "alarm_mode"
+      "alarm_mode",
+      "annotation"
     ];
 
     const lines = [headers.join(",")];
@@ -1419,6 +1505,22 @@ function parseHeartRate(value) {
   return { bpm, contact };
 }
 
+function formatLastStorageTime(date) {
+  const parts = new Intl.DateTimeFormat("nl-NL", {
+    weekday: "short",
+    day: "numeric",
+    month: "short",
+    year: "numeric",
+    hour: "2-digit",
+    minute: "2-digit",
+    hour12: false
+  }).formatToParts(date);
+  const values = Object.fromEntries(parts.map(part => [part.type, part.value]));
+  const weekday = (values.weekday || "").replace(".", "");
+  const month = (values.month || "").replace(".", "");
+  return `${weekday} ${values.day} ${month} ${values.year} ${values.hour}.${values.minute}`;
+}
+
 async function onHeartRate(event) {
   checkNewDay();
   lastHeartRateAt = Date.now();
@@ -1451,11 +1553,13 @@ async function onHeartRate(event) {
   };
 
   todaySamples.push({
+    id: sample.id,
     time: sample.ts_ms,
     label: sample.time_label,
     bpm: sample.bpm,
     alarm_limit: sample.alarm_limit,
-    above_limit: sample.above_limit
+    above_limit: sample.above_limit,
+    annotation: sample.annotation || ""
   });
 
   if (todaySamples.length > 100000) {
@@ -1470,7 +1574,7 @@ async function onHeartRate(event) {
   saveSampleIndexedDb(sample)
     .then(() => {
       saveCounter += 1;
-      setDbInfo("Opgeslagen: " + parsed.bpm + " bpm", "ok");
+      setDbInfo("Laatste opslag: " + formatLastStorageTime(now), "ok");
 
       if (saveCounter % 20 === 0) {
         log("IndexedDB opslag OK: " + saveCounter + " metingen sinds start");
@@ -1634,7 +1738,7 @@ function resizeCanvas(canvas) {
 
 function getChartState(canvas) {
   if (!canvas.__heartRateChartState) {
-    canvas.__heartRateChartState = { zoom: 1, center: 0.5, inspectTime: null };
+    canvas.__heartRateChartState = { zoom: 1, center: 0.5, inspectTime: null, inspectSample: null };
   }
   return canvas.__heartRateChartState;
 }
@@ -1835,15 +1939,17 @@ function drawHeartRateCanvas(canvas, infoElement, sourceSamples, dateKey, isToda
         minute: "2-digit",
         second: "2-digit"
       });
+      state.inspectSample = nearest;
       const tooltipLines = [
         timeText,
         `Hartslag: ${nearest.bpm} bpm`,
         nearest.bpm > limit ? "Boven grens: ja" : "Boven grens: nee"
       ];
+      if (nearest.annotation) tooltipLines.push(`Info: ${nearest.annotation}`);
       context.font = `${12 * ratio}px monospace`;
       const textWidth = Math.max(...tooltipLines.map(line => context.measureText(line).width));
       const boxWidth = textWidth + 18 * ratio;
-      const boxHeight = 58 * ratio;
+      const boxHeight = (10 + tooltipLines.length * 16) * ratio;
       let boxX = inspectX + 10 * ratio;
       if (boxX + boxWidth > padLeft + chartWidth) boxX = inspectX - boxWidth - 10 * ratio;
       boxX = Math.max(padLeft + 2 * ratio, Math.min(padLeft + chartWidth - boxWidth - 2 * ratio, boxX));
@@ -1875,6 +1981,85 @@ function drawHeartRateCanvas(canvas, infoElement, sourceSamples, dateKey, isToda
       " | boven grens: " + highCount;
   }
 }
+
+let pendingAnnotationSample = null;
+let pendingAnnotationRedraw = null;
+
+function saveAnnotationIndexedDb(sampleId, annotation) {
+  return new Promise((resolve, reject) => {
+    if (!db) {
+      reject(new Error("IndexedDB is nog niet open"));
+      return;
+    }
+    const transaction = db.transaction(STORE_NAME, "readwrite");
+    const store = transaction.objectStore(STORE_NAME);
+    const request = store.get(sampleId);
+    request.onsuccess = () => {
+      const record = request.result;
+      if (!record) {
+        reject(new Error("Meting niet gevonden"));
+        return;
+      }
+      record.annotation = annotation;
+      store.put(record);
+    };
+    request.onerror = event => reject(event.target.error);
+    transaction.oncomplete = () => resolve(true);
+    transaction.onerror = event => reject(event.target.error || transaction.error);
+  });
+}
+
+function updateAnnotationInMemory(sampleId, annotation) {
+  const update = samples => {
+    if (!samples) return;
+    for (const sample of samples) {
+      if (sample.id === sampleId) sample.annotation = annotation;
+    }
+  };
+  update(todaySamples);
+  if (typeof historicalSamples !== "undefined") update(historicalSamples);
+}
+
+function openAnnotationDialog(sample, redraw) {
+  if (!sample || !sample.id) return;
+  const dialog = document.getElementById("annotationDialog");
+  const select = document.getElementById("annotationSelect");
+  const info = document.getElementById("annotationPointInfo");
+  if (!dialog || !select || !info) return;
+  pendingAnnotationSample = sample;
+  pendingAnnotationRedraw = redraw;
+  select.value = sample.annotation || "";
+  info.textContent = `${new Date(sample.time).toLocaleTimeString([], {hour:"2-digit", minute:"2-digit", second:"2-digit"})} · ${sample.bpm} bpm`;
+  if (!dialog.open) dialog.showModal();
+}
+
+async function commitAnnotation() {
+  const dialog = document.getElementById("annotationDialog");
+  const select = document.getElementById("annotationSelect");
+  const sample = pendingAnnotationSample;
+  if (!sample || !select) return;
+  const annotation = select.value;
+  try {
+    await saveAnnotationIndexedDb(sample.id, annotation);
+    sample.annotation = annotation;
+    updateAnnotationInMemory(sample.id, annotation);
+    setDbInfo("Info opgeslagen", "ok");
+    if (pendingAnnotationRedraw) pendingAnnotationRedraw();
+    if (dialog && dialog.open) dialog.close();
+  } catch (error) {
+    setDbInfo("Info opslaan fout", "bad");
+    log("Info opslaan FOUT: " + error);
+  } finally {
+    pendingAnnotationSample = null;
+    pendingAnnotationRedraw = null;
+  }
+}
+
+document.getElementById("saveAnnotationButton")?.addEventListener("click", commitAnnotation);
+document.getElementById("annotationDialog")?.addEventListener("close", () => {
+  pendingAnnotationSample = null;
+  pendingAnnotationRedraw = null;
+});
 
 function bindChartInteraction(canvas, redraw) {
   if (!canvas || canvas.__heartRateInteractionBound) return;
@@ -1992,8 +2177,12 @@ function bindChartInteraction(canvas, redraw) {
       panStartX = null;
       if (inspecting) {
         inspecting = false;
+        const state = getChartState(canvas);
+        const inspectedSample = state.inspectSample || null;
+        if (inspectedSample) openAnnotationDialog(inspectedSample, redraw);
         setTimeout(() => {
-          getChartState(canvas).inspectTime = null;
+          state.inspectTime = null;
+          state.inspectSample = null;
           redraw();
         }, 650);
       }
@@ -2023,7 +2212,7 @@ function bindChartInteraction(canvas, redraw) {
 function resetChartZoom(canvasId) {
   const canvas = document.getElementById(canvasId);
   if (!canvas) return;
-  canvas.__heartRateChartState = { zoom: 1, center: 0.5, inspectTime: null };
+  canvas.__heartRateChartState = { zoom: 1, center: 0.5, inspectTime: null, inspectSample: null };
   if (typeof drawRecentDayCharts === "function") drawRecentDayCharts();
   drawChart();
 }
@@ -2088,6 +2277,6 @@ window.addEventListener("load", async () => {
   }, 1000);
 });
 </script>
-  <script src="./features.js?v=2026.07.18-v12"></script>
+  <script src="./features.js?v=2026.07.18-v13"></script>
 </body>
 </html>

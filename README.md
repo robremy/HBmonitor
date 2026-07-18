@@ -31,7 +31,7 @@ Settings → Share HR → On
 Alle hartslagmetingen blijven lokaal in Chrome IndexedDB op het apparaat.
 Gebruik "Download CSV vandaag" om data te exporteren.
 
-## Versie 2026.07.18-v12
+## Versie 2026.07.18-v13
 
 - Pinch-zoom rond het aangeraakte tijdstip.
 - Horizontaal schuiven met één vinger wanneer ingezoomd.
@@ -42,3 +42,5 @@ Gebruik "Download CSV vandaag" om data te exporteren.
 - Automatisch opnieuw verbinden na een onverwachte Web Bluetooth-verbreking.
 - Bij terugkeer uit het lock screen controleert de app direct de verbinding en probeert deze te herstellen.
 - Handmatig verbreken start geen automatische reconnect.
+
+- Detailvenster kan een activiteit of klacht aan een exact meetpunt koppelen; deze info wordt lokaal opgeslagen en meegenomen in CSV-export.
