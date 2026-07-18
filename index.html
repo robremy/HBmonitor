@@ -318,7 +318,7 @@
     <div id="deviceName" class="status"></div>
     <div id="lastDeviceInfo" class="status"></div>
     <div id="wakeLockInfo" class="status">Screen wakelock: niet actief</div>
-    <div id="softwareVersionInfo" class="status">Softwareversie: 2026.07.18-v17</div>
+    <div id="softwareVersionInfo" class="status">Softwareversie: 2026.07.18-v18</div>
     <div id="updateInfo" class="update-line" role="status" aria-live="polite">
       <strong>Nieuwe softwareversie beschikbaar.</strong><br>
       Werk bij wanneer de hartslagmeting veilig onderbroken kan worden.<br>
@@ -338,7 +338,6 @@
     <button class="red" onclick="testAlarm()">Test alarm</button>
     <button class="gray" onclick="stopVibration()">Stop alarm</button>
     <button id="installBtn" class="purple" onclick="installPwa()" style="display:none;">Installeer app</button>
-    <button class="purple" type="button" onclick="openAnnotationOptionsDialog()">Annotatie opties</button>
 
     <label>
       Alarmgrens:
@@ -423,7 +422,7 @@
 <script>
 "use strict";
 
-const SOFTWARE_VERSION = "2026.07.18-v17";
+const SOFTWARE_VERSION = "2026.07.18-v18";
 
 const HR_SERVICE = "0000180d-0000-1000-8000-00805f9b34fb";
 const HR_MEASUREMENT = "00002a37-0000-1000-8000-00805f9b34fb";
@@ -490,6 +489,17 @@ function refreshAnnotationSelect(selectedValue = "") {
     element.textContent = `${option.icon} ${option.label}`;
     select.appendChild(element);
   }
+
+  const separator = document.createElement("option");
+  separator.disabled = true;
+  separator.textContent = "────────────";
+  select.appendChild(separator);
+
+  const manage = document.createElement("option");
+  manage.value = "__manage_annotation_options__";
+  manage.textContent = "⚙️ Opties wijzigen…";
+  select.appendChild(manage);
+
   if (current && !annotationOptions.some(option => option.label === current)) {
     const legacy = document.createElement("option");
     legacy.value = current;
@@ -705,7 +715,7 @@ async function registerServiceWorker() {
   }
 
   try {
-    const registration = await navigator.serviceWorker.register("./sw.js?v=2026.07.18-v17", {
+    const registration = await navigator.serviceWorker.register("./sw.js?v=2026.07.18-v18", {
       scope: "./",
       updateViaCache: "none"
     });
@@ -2237,6 +2247,18 @@ document.getElementById("saveAnnotationOptionsButton")?.addEventListener("click"
 
 let pendingAnnotationSample = null;
 let pendingAnnotationRedraw = null;
+let reopenAnnotationAfterOptions = false;
+
+function openAnnotationOptionsFromAnnotation() {
+  const annotationDialog = document.getElementById("annotationDialog");
+  const select = document.getElementById("annotationSelect");
+  if (!pendingAnnotationSample || !annotationDialog || !select) return;
+
+  refreshAnnotationSelect(pendingAnnotationSample.annotation || "");
+  reopenAnnotationAfterOptions = true;
+  if (annotationDialog.open) annotationDialog.close();
+  openAnnotationOptionsDialog();
+}
 
 function saveAnnotationIndexedDb(sampleId, annotation) {
   return new Promise((resolve, reject) => {
@@ -2319,7 +2341,24 @@ async function commitAnnotation() {
 }
 
 document.getElementById("saveAnnotationButton")?.addEventListener("click", commitAnnotation);
+document.getElementById("annotationSelect")?.addEventListener("change", event => {
+  if (event.target.value === "__manage_annotation_options__") {
+    openAnnotationOptionsFromAnnotation();
+  }
+});
+document.getElementById("annotationOptionsDialog")?.addEventListener("close", () => {
+  if (!reopenAnnotationAfterOptions || !pendingAnnotationSample) return;
+  reopenAnnotationAfterOptions = false;
+  const dialog = document.getElementById("annotationDialog");
+  const info = document.getElementById("annotationPointInfo");
+  refreshAnnotationSelect(pendingAnnotationSample.annotation || "");
+  if (info) {
+    info.textContent = `${new Date(pendingAnnotationSample.time).toLocaleTimeString([], {hour:"2-digit", minute:"2-digit", second:"2-digit"})} · ${pendingAnnotationSample.bpm} bpm`;
+  }
+  if (dialog && !dialog.open) dialog.showModal();
+});
 document.getElementById("annotationDialog")?.addEventListener("close", () => {
+  if (reopenAnnotationAfterOptions) return;
   pendingAnnotationSample = null;
   pendingAnnotationRedraw = null;
 });
@@ -2541,6 +2580,6 @@ window.addEventListener("load", async () => {
   }, 1000);
 });
 </script>
-  <script src="./features.js?v=2026.07.18-v17"></script>
+  <script src="./features.js?v=2026.07.18-v18"></script>
 </body>
 </html>
