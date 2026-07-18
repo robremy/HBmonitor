@@ -1,17 +1,17 @@
 /*
  * HBmonitor gegevensbeheer en historische grafieken
- * Versie: 2026.07.17-v2
+ * Versie: 2026.07.18-v1
  *
  * Functies:
  * - Export van alle opgeslagen dagen naar één CSV-bestand
  * - Import van HBmonitor-CSV met validatie en duplicaatbescherming
- * - Historische datum selecteren voor grafiek en statistieken
+ * - Een historische datum selecteren voor de grafiek
  */
 
 "use strict";
 
 (() => {
-  const FEATURE_VERSION = "2026.07.17-v2";
+  const FEATURE_VERSION = "2026.07.18-v1";
   const CSV_HEADERS = [
     "id",
     "ts_ms",
@@ -341,6 +341,7 @@
 
       if (dateKey === todayKey) {
         selectedDateKey = todayKey;
+        document.getElementById("returnTodayButton").style.display = "none";
         await loadTodayFromIndexedDb();
         drawChart();
         setOutput({
@@ -355,6 +356,7 @@
       const rows = await getSamplesByDate(dateKey);
       selectedDateKey = dateKey;
       historicalSamples = mapStoredRowsForGraph(rows);
+      document.getElementById("returnTodayButton").style.display = "inline-block";
       drawChart();
 
       setOutput({
@@ -398,6 +400,7 @@
 
     selectedDateKey = todayKey;
     historicalSamples = [];
+    document.getElementById("returnTodayButton").style.display = "none";
 
     if (input) {
       input.value = todayKey;
@@ -461,11 +464,11 @@
         filename: "heart_rate_all_" + todayKey + ".csv"
       });
       setDbInfo("alle dagen geëxporteerd", "ok");
-      log("CSV alle dagen gemaakt: " + rows.length + " metingen");
+      log("CSV met alle metingen gemaakt: " + rows.length + " metingen");
     } catch (error) {
       setOutput("CSV-export van alle dagen mislukt: " + error);
-      setDbInfo("CSV alle dagen fout", "bad");
-      log("CSV alle dagen FOUT: " + error);
+      setDbInfo("CSV-export fout", "bad");
+      log("CSV-export FOUT: " + error);
     }
   }
 
@@ -616,7 +619,7 @@
     return {
       id: stableImportedId(row, tsMs, bpm),
       ts_ms: tsMs,
-      ts_local: row.ts_local || date.toISOString(),
+      ts_local: row.ts_local || toLocalIsoString(date),
       date_key: row.date_key || getDayKey(date),
       time_label: row.time_label || date.toLocaleTimeString(),
       bpm,
@@ -755,8 +758,8 @@
     container.id = "hbDataFeatures";
     container.innerHTML = `
       <div style="margin-top:12px;padding-top:12px;border-top:1px solid #3a3a3a;">
-        <b>Alle gegevens</b><br>
-        <button id="exportAllCsvButton" class="purple" type="button">Download CSV alle dagen</button>
+        <b>Alle metingen</b><br>
+        <button id="exportAllCsvButton" class="purple" type="button">Exporteer CSV</button>
         <button id="importCsvButton" class="purple" type="button">Importeer CSV</button>
         <input id="importCsvInput" type="file" accept=".csv,text/csv" style="display:none;">
       </div>
@@ -766,9 +769,8 @@
           Datum:
           <input id="historyDate" type="date" style="width:auto;min-width:155px;">
         </label>
-        <button id="loadHistoryButton" class="purple" type="button">Laad datum</button>
-        <button id="historyStatsButton" class="purple" type="button">Stats datum</button>
-        <button id="returnTodayButton" class="gray" type="button">Terug naar vandaag</button>
+        <button id="loadHistoryButton" class="purple" type="button">Toon geselecteerde dag</button>
+        <button id="returnTodayButton" class="gray" type="button" style="display:none;">Terug naar vandaag</button>
       </div>
     `;
 
@@ -794,8 +796,6 @@
 
     document.getElementById("loadHistoryButton")
       .addEventListener("click", loadSelectedDate);
-    document.getElementById("historyStatsButton")
-      .addEventListener("click", showSelectedDateStats);
     document.getElementById("returnTodayButton")
       .addEventListener("click", returnToToday);
 
@@ -816,6 +816,6 @@
       log("Historische daggrafieken laden FOUT: " + error);
     }
     drawChart();
-    log("Gegevensfuncties actief: vier daggrafieken, CSV alle dagen, CSV-import en historische datums");
+    log("Gegevensfuncties actief: vier daggrafieken, CSV-export, CSV-import en historische datum");
   });
 })();

@@ -186,7 +186,7 @@
     <div id="lastDeviceInfo" class="status"></div>
     <div id="wakeLockInfo" class="status"></div>
     <div id="pwaInfo" class="status">PWA: initialiseren...</div>
-    <div id="softwareVersionInfo" class="status">Softwareversie: 2026.07.17-v2</div>
+    <div id="softwareVersionInfo" class="status">Softwareversie: 2026.07.18-v1</div>
     <div id="updateInfo" class="update-line" role="status" aria-live="polite">
       <strong>Nieuwe softwareversie beschikbaar.</strong><br>
       Werk bij wanneer de hartslagmeting veilig onderbroken kan worden.<br>
@@ -236,8 +236,6 @@
     <b>IndexedDB opvragen</b><br>
     <button class="purple" onclick="loadTodayFromIndexedDb()">Laad vandaag uit IndexedDB</button>
     <button class="purple" onclick="showStatsToday()">Stats vandaag</button>
-    <button class="purple" onclick="downloadCsvToday()">Download CSV vandaag</button>
-    <button class="purple" onclick="showDays()">Toon dagen</button>
     <button class="red" onclick="deleteTodayConfirm()">Verwijder vandaag</button>
     <pre id="queryOutput">Nog niets opgevraagd.</pre>
   </div>
@@ -261,7 +259,7 @@
 <script>
 "use strict";
 
-const SOFTWARE_VERSION = "2026.07.17-v2";
+const SOFTWARE_VERSION = "2026.07.18-v1";
 
 const HR_SERVICE = "0000180d-0000-1000-8000-00805f9b34fb";
 const HR_MEASUREMENT = "00002a37-0000-1000-8000-00805f9b34fb";
@@ -301,6 +299,23 @@ function getDayKey(date) {
   return date.getFullYear() + "-" +
     String(date.getMonth() + 1).padStart(2, "0") + "-" +
     String(date.getDate()).padStart(2, "0");
+}
+
+function toLocalIsoString(date) {
+  const offsetMinutes = -date.getTimezoneOffset();
+  const sign = offsetMinutes >= 0 ? "+" : "-";
+  const absoluteOffset = Math.abs(offsetMinutes);
+  const offsetHours = String(Math.floor(absoluteOffset / 60)).padStart(2, "0");
+  const offsetMins = String(absoluteOffset % 60).padStart(2, "0");
+
+  return date.getFullYear() + "-" +
+    String(date.getMonth() + 1).padStart(2, "0") + "-" +
+    String(date.getDate()).padStart(2, "0") + "T" +
+    String(date.getHours()).padStart(2, "0") + ":" +
+    String(date.getMinutes()).padStart(2, "0") + ":" +
+    String(date.getSeconds()).padStart(2, "0") + "." +
+    String(date.getMilliseconds()).padStart(3, "0") +
+    sign + offsetHours + ":" + offsetMins;
 }
 
 function log(message) {
@@ -1361,7 +1376,7 @@ async function onHeartRate(event) {
   const sample = {
     id: String(now.getTime()) + "_" + Math.random().toString(36).slice(2),
     ts_ms: now.getTime(),
-    ts_local: now.toISOString(),
+    ts_local: toLocalIsoString(now),
     date_key: getDayKey(now),
     time_label: now.toLocaleTimeString(),
     bpm: parsed.bpm,
