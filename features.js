@@ -1,17 +1,17 @@
 /*
- * HBmonitor gegevensbeheer en historische grafieken
+ * Heart Rate Alert gegevensbeheer en historische grafieken
  * Versie: 2026.07.18-v3
  *
  * Functies:
  * - Export van alle opgeslagen dagen naar één CSV-bestand
- * - Import van HBmonitor-CSV met validatie en duplicaatbescherming
+ * - Import van Heart Rate Alert-CSV met validatie en duplicaatbescherming
  * - Een historische datum selecteren voor de grafiek
  */
 
 "use strict";
 
 (() => {
-  const FEATURE_VERSION = "2026.07.18-v4";
+  const FEATURE_VERSION = "2026.07.18-v5";
   const CSV_HEADERS = [
     "id",
     "ts_ms",

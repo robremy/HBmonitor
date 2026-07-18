@@ -1,14 +1,14 @@
-# Xiaomi Smart Band 10 Heart Rate Alarm PWA
+# Heart Rate Alert
 
 ## Screenshot
 
 <p align="center">
   <img src="hbmonitor-screenshot.jpg"
-       alt="Xiaomi Smart Band 10 hartslag alarm PWA op een smartphone"
+       alt="Heart Rate Alert op een smartphone"
        width="380">
 </p>
 
-Deze Progressive Web App functioneert offline in Chrome:
+Heart Rate Alert functioneert offline in Chrome:
 
 - Web Bluetooth
 - middels IndexedDB lokale opslag van
@@ -31,7 +31,7 @@ Settings → Share HR → On
 Alle hartslagmetingen blijven lokaal in Chrome IndexedDB op het apparaat.
 Gebruik "Download CSV vandaag" om data te exporteren.
 
-## Versie 2026.07.18-v4
+## Versie 2026.07.18-v5
 
 - Vier hartslaggrafieken onder elkaar: vandaag en de drie voorgaande dagen.
 - Automatisch opnieuw verbinden na een onverwachte Web Bluetooth-verbreking.

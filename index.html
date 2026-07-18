@@ -7,13 +7,13 @@
   <meta name="mobile-web-app-capable" content="yes">
   <meta name="apple-mobile-web-app-capable" content="yes">
   <meta name="apple-mobile-web-app-status-bar-style" content="black">
-  <meta name="apple-mobile-web-app-title" content="HR Alarm">
+  <meta name="apple-mobile-web-app-title" content="Heart Rate Alert">
 
   <link rel="manifest" href="./manifest.webmanifest">
   <link rel="icon" href="./icon-192.png">
   <link rel="apple-touch-icon" href="./icon-192.png">
 
-  <title>Xiaomi Band Hartslag Alarm PWA</title>
+  <title>Heart Rate Alert</title>
 
   <style>
     :root {
@@ -185,14 +185,14 @@
 
 <body>
   <div id="mainCard" class="card">
-    <h1>Xiaomi Smart Band 10 hartslag alarm PWA</h1>
+    <h1>Heart Rate Alert</h1>
     <div id="bpm" class="bpm">--</div>
     <div id="contact" class="status">Contact: niet gedetecteerd</div>
     <div id="deviceName" class="status"></div>
     <div id="lastDeviceInfo" class="status"></div>
     <div id="wakeLockInfo" class="status">Screen wakelock: niet actief</div>
     <div id="pwaInfo" class="status">PWA: initialiseren...</div>
-    <div id="softwareVersionInfo" class="status">Softwareversie: 2026.07.18-v4</div>
+    <div id="softwareVersionInfo" class="status">Softwareversie: 2026.07.18-v5</div>
     <div id="updateInfo" class="update-line" role="status" aria-live="polite">
       <strong>Nieuwe softwareversie beschikbaar.</strong><br>
       Werk bij wanneer de hartslagmeting veilig onderbroken kan worden.<br>
@@ -261,7 +261,7 @@
 <script>
 "use strict";
 
-const SOFTWARE_VERSION = "2026.07.18-v4";
+const SOFTWARE_VERSION = "2026.07.18-v5";
 
 const HR_SERVICE = "0000180d-0000-1000-8000-00805f9b34fb";
 const HR_MEASUREMENT = "00002a37-0000-1000-8000-00805f9b34fb";

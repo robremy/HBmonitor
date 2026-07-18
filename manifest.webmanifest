@@ -1,7 +1,7 @@
 {
-  "name": "Xiaomi Smart Band 10 Heart Rate Alarm",
-  "short_name": "HR Alarm",
-  "description": "Lokale PWA voor Xiaomi Smart Band 10 hartslag, alarm, grafiek en IndexedDB opslag.",
+  "name": "Heart Rate Alert",
+  "short_name": "Heart Rate Alert",
+  "description": "Lokale app voor live hartslagmeting, alarmen, grafieken en opslag.",
   "start_url": "./",
   "scope": "./",
   "display": "standalone",

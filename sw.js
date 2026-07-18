@@ -1,11 +1,11 @@
 /*
- * HB Monitor PWA service worker
+ * Heart Rate Alert service worker
  *
  * Wijzig APP_VERSION bij iedere nieuwe release.
  * Gebruik in index.html dezelfde SOFTWARE_VERSION.
  */
 
-const APP_VERSION = "2026.07.18-v4";
+const APP_VERSION = "2026.07.18-v5";
 const CACHE_PREFIX = "xiaomi-band10-hr-pwa-";
 const CACHE_NAME = CACHE_PREFIX + APP_VERSION;
 const OFFLINE_PAGE = "./index.html";
