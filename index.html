@@ -53,6 +53,12 @@
       margin: 10px 0;
     }
 
+    .live-heart-rate {
+      font-size: 32px;
+      font-weight: 800;
+      margin: 10px 0;
+    }
+
     .status {
       font-size: 16px;
       color: #bbb;
@@ -181,12 +187,12 @@
   <div id="mainCard" class="card">
     <h1>Xiaomi Smart Band 10 hartslag alarm PWA</h1>
     <div id="bpm" class="bpm">--</div>
-    <div id="contact" class="status">Status: niet verbonden</div>
+    <div id="contact" class="status">Nog niet verbonden</div>
     <div id="deviceName" class="status"></div>
     <div id="lastDeviceInfo" class="status"></div>
-    <div id="wakeLockInfo" class="status">Screen wakelock: niet actief</div>
+    <div id="wakeLockInfo" class="status"></div>
     <div id="pwaInfo" class="status">PWA: initialiseren...</div>
-    <div id="softwareVersionInfo" class="status">Softwareversie: 2026.07.18-v2</div>
+    <div id="softwareVersionInfo" class="status">Softwareversie: 2026.07.18-v3</div>
     <div id="updateInfo" class="update-line" role="status" aria-live="polite">
       <strong>Nieuwe softwareversie beschikbaar.</strong><br>
       Werk bij wanneer de hartslagmeting veilig onderbroken kan worden.<br>
@@ -199,12 +205,12 @@
   </div>
 
   <div class="card">
+    <button class="orange" onclick="connectLastBand()">Opnieuw verbinden</button>
     <button onclick="connectBand()">Verbinden</button>
-    <button class="orange" onclick="connectLastBand()">Gebruik laatst verbonden band</button>
     <button class="gray" onclick="disconnectBand()">Verbreken</button>
     <button id="alarmModeButton" class="green" onclick="toggleAlarmMode()">Alarm: tril</button>
     <button class="red" onclick="testAlarm()">Test alarm</button>
-    <button class="gray" onclick="stopVibration()">Stop trillen</button>
+    <button class="gray" onclick="stopVibration()">Stop alarm</button>
     <button id="installBtn" class="purple" onclick="installPwa()" style="display:none;">Installeer app</button>
 
     <label>
@@ -224,19 +230,11 @@
     </label>
 
     <div id="alarmStatus" class="status">Alarmstatus: wacht op hartslag</div>
-
-    <div class="small">
-      Chrome doet Web Bluetooth, alarm, grafiek en opslag zelf.
-      Metingen worden lokaal opgeslagen in IndexedDB. De standaard alarmgrens is 76 bpm.
-      Dit is een bovengrens: het alarm gaat af bij een hartslag hoger dan 76 bpm.
-    </div>
   </div>
 
   <div class="card">
-    <b>Metingen</b><br>
-    <button class="purple" onclick="showStatsToday()">Stats vandaag</button>
-    <button class="red" onclick="deleteTodayConfirm()">Verwijder vandaag</button>
-    <pre id="queryOutput">Nog niets opgevraagd.</pre>
+    <b>Gegevens</b><br>
+    <pre id="queryOutput" style="display:none;"></pre>
   </div>
 
   <div class="card">
@@ -245,7 +243,7 @@
   </div>
 
   <div class="card">
-    <b>Hartslag: <span id="currentHeartRate">-- bpm</span></b>
+    <div id="liveHeartRate" class="live-heart-rate">Hartslag: -- bpm</div>
   </div>
 
   <div class="card">
@@ -262,7 +260,7 @@
 <script>
 "use strict";
 
-const SOFTWARE_VERSION = "2026.07.18-v2";
+const SOFTWARE_VERSION = "2026.07.18-v3";
 
 const HR_SERVICE = "0000180d-0000-1000-8000-00805f9b34fb";
 const HR_MEASUREMENT = "00002a37-0000-1000-8000-00805f9b34fb";
@@ -635,7 +633,7 @@ function openIndexedDb() {
         alert("Nieuwe databaseversie beschikbaar. Sluit en open de app opnieuw.");
       };
 
-      setDbInfo("opgeslagen", "ok");
+      setDbInfo("klaar", "ok");
       resolve(db);
     };
 
@@ -987,13 +985,13 @@ async function requestScreenWakeLock() {
 
   try {
     if (!("wakeLock" in navigator)) {
-      element.textContent = "Screen wakelock: niet ondersteund";
+      element.textContent = "Browser screen WakeLock niet ondersteund";
       log("Browser screen WakeLock niet ondersteund");
       return;
     }
 
     if (screenWakeLock !== null) {
-      element.textContent = "Screen wakelock: actief";
+      element.textContent = "Browser screen WakeLock actief";
       return;
     }
 
@@ -1002,14 +1000,14 @@ async function requestScreenWakeLock() {
     screenWakeLock.addEventListener("release", () => {
       screenWakeLock = null;
       document.getElementById("wakeLockInfo").textContent =
-        "Screen wakelock: niet actief";
+        "Browser screen WakeLock vrijgegeven";
       log("Browser screen WakeLock vrijgegeven");
     });
 
-    element.textContent = "Screen wakelock: actief";
+    element.textContent = "Browser screen WakeLock actief";
     log("Browser screen WakeLock actief");
   } catch (error) {
-    element.textContent = "Screen wakelock: niet actief";
+    element.textContent = "Browser screen WakeLock niet actief";
     log("Browser screen WakeLock fout: " + error);
   }
 }
@@ -1088,7 +1086,7 @@ async function connectLastBand() {
 
     await connectToDevice(device, true);
   } catch (error) {
-    log("Gebruik laatst verbonden band mislukt: " + error);
+    log("Opnieuw verbinden mislukt: " + error);
     setStatus("Kiezen geannuleerd of mislukt.", "warn");
   }
 }
@@ -1141,8 +1139,8 @@ async function autoConnectLastBandOnStartup() {
 
   const restored = await restoreDeviceReference();
   if (!restored) {
-    log("Bandtoestemming niet automatisch teruggevonden. Druk eenmaal op Gebruik laatst verbonden band.");
-    setStatus("Druk eenmaal op Gebruik laatst verbonden band.", "warn");
+    log("Bandtoestemming niet automatisch teruggevonden. Druk eenmaal op Opnieuw verbinden.");
+    setStatus("Druk eenmaal op Opnieuw verbinden.", "warn");
     return;
   }
 
@@ -1189,7 +1187,6 @@ async function connectToDevice(selectedDevice, storeDevice) {
   }
 
   log("Live hartslag gestart");
-  document.getElementById("contact").textContent = "Status: verbonden";
   setStatus("Verbonden. Wacht op hartslag...", "ok");
 }
 
@@ -1229,7 +1226,7 @@ async function reconnectBand(forceReset = false) {
   await restoreDeviceReference();
   if (!device) {
     log("Automatisch opnieuw verbinden niet mogelijk: geen eerder toegestaan apparaat gevonden");
-    setStatus("Druk eenmaal op Gebruik laatst verbonden band.", "warn");
+    setStatus("Druk eenmaal op Opnieuw verbinden.", "warn");
     return;
   }
 
@@ -1304,7 +1301,7 @@ function onDisconnected() {
   }
 
   log("Bluetooth verbinding onverwacht verbroken; automatisch herstel gestart");
-  document.getElementById("contact").textContent = "Status: niet verbonden";
+  document.getElementById("contact").textContent = "Verbinding verbroken";
   setStatus("Verbinding verbroken. Automatisch herstel gestart.", "bad");
   scheduleReconnect(true);
 }
@@ -1370,8 +1367,9 @@ async function onHeartRate(event) {
 
   const parsed = parseHeartRate(event.target.value);
   document.getElementById("bpm").textContent = parsed.bpm;
-  document.getElementById("contact").textContent = "Status: verbonden";
-  document.getElementById("currentHeartRate").textContent = parsed.bpm + " bpm";
+  const liveHeartRate = document.getElementById("liveHeartRate");
+  if (liveHeartRate) liveHeartRate.textContent = "Hartslag: " + parsed.bpm + " bpm";
+  document.getElementById("contact").textContent = parsed.contact;
 
   const now = new Date();
   const limit = getLimit();
@@ -1446,7 +1444,7 @@ function checkAlarm(bpm) {
     setStatus(
       "Alarmstatus: hartslag boven alarmgrens (" + limit +
       " bpm) gedurende " + highFor + " sec",
-      "warn"
+      "bad"
     );
 
     if (

@@ -5,7 +5,7 @@
  * Gebruik in index.html dezelfde SOFTWARE_VERSION.
  */
 
-const APP_VERSION = "2026.07.18-v2";
+const APP_VERSION = "2026.07.18-v3";
 const CACHE_PREFIX = "xiaomi-band10-hr-pwa-";
 const CACHE_NAME = CACHE_PREFIX + APP_VERSION;
 const OFFLINE_PAGE = "./index.html";

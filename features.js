@@ -1,6 +1,6 @@
 /*
  * HBmonitor gegevensbeheer en historische grafieken
- * Versie: 2026.07.18-v2
+ * Versie: 2026.07.18-v3
  *
  * Functies:
  * - Export van alle opgeslagen dagen naar één CSV-bestand
@@ -11,7 +11,7 @@
 "use strict";
 
 (() => {
-  const FEATURE_VERSION = "2026.07.18-v2";
+  const FEATURE_VERSION = "2026.07.18-v3";
   const CSV_HEADERS = [
     "id",
     "ts_ms",
@@ -128,10 +128,9 @@
   let recentChartsLoadPromise = null;
 
   function dateKeyDaysAgo(daysAgo) {
-    const date = new Date();
-    date.setHours(12, 0, 0, 0);
-    date.setDate(date.getDate() - daysAgo);
-    return getDayKey(date);
+    const anchor = new Date(selectedDateKey + "T12:00:00");
+    anchor.setDate(anchor.getDate() - daysAgo);
+    return getDayKey(anchor);
   }
 
   function formatDayTitle(dateKey, daysAgo) {
@@ -141,7 +140,8 @@
       day: "2-digit",
       month: "2-digit"
     });
-    return daysAgo === 0
+    const isToday = dateKey === getDayKey(new Date());
+    return daysAgo === 0 && isToday
       ? "Hartslaggrafiek vandaag — " + label
       : "Hartslaggrafiek " + label;
   }
@@ -315,11 +315,28 @@
     recentChartsLoadPromise = (async () => {
       createRecentCharts();
       await waitForIndexedDb();
-      for (let daysAgo = 1; daysAgo < RECENT_DAY_COUNT; daysAgo += 1) {
+      recentDaySamples.clear();
+      for (let daysAgo = 0; daysAgo < RECENT_DAY_COUNT; daysAgo += 1) {
         const dateKey = dateKeyDaysAgo(daysAgo);
         const rows = await getSamplesByDate(dateKey);
-        recentDaySamples.set(dateKey, mapStoredRowsForGraph(rows));
+        const mapped = mapStoredRowsForGraph(rows);
+        recentDaySamples.set(dateKey, mapped);
+        if (daysAgo === 0) {
+          if (dateKey === getDayKey(new Date())) {
+            todaySamples = mapped;
+            historicalSamples = [];
+          } else {
+            historicalSamples = mapped;
+          }
+        }
       }
+      const mainTitle = getGraphTitleElement();
+      if (mainTitle) mainTitle.textContent = formatDayTitle(dateKeyDaysAgo(0), 0);
+      for (let daysAgo = 1; daysAgo < RECENT_DAY_COUNT; daysAgo += 1) {
+        const title = document.querySelector(`#hrChartDay${daysAgo}`)?.closest(".card")?.querySelector("b");
+        if (title) title.textContent = formatDayTitle(dateKeyDaysAgo(daysAgo), daysAgo);
+      }
+      drawChart();
       drawRecentDayCharts();
     })();
 
@@ -332,47 +349,14 @@
 
   async function loadSelectedDate() {
     const input = document.getElementById("historyDate");
-    const dateKey = input && input.value
-      ? input.value
-      : getDayKey(new Date());
-
+    selectedDateKey = input && input.value ? input.value : getDayKey(new Date());
     try {
-      const todayKey = getDayKey(new Date());
-
-      if (dateKey === todayKey) {
-        selectedDateKey = todayKey;
-        document.getElementById("returnTodayButton").style.display = "none";
-        await loadTodayFromIndexedDb();
-        drawChart();
-        setOutput({
-          ok: true,
-          date: dateKey,
-          total_samples: todaySamples.length,
-          view: "vandaag"
-        });
-        return;
-      }
-
-      const rows = await getSamplesByDate(dateKey);
-      selectedDateKey = dateKey;
-      historicalSamples = mapStoredRowsForGraph(rows);
-      document.getElementById("returnTodayButton").style.display = "inline-block";
-      drawChart();
-
-      setOutput({
-        ok: true,
-        date: dateKey,
-        total_samples: rows.length,
-        returned_samples_for_graph: historicalSamples.length,
-        view: "historisch"
-      });
-
-      log("Historische datum geladen: " + dateKey + " | " + rows.length + " metingen");
-      setDbInfo("datum geladen: " + dateKey, "ok");
+      await loadRecentDayCharts();
+      log("Vier dagen geladen vanaf " + selectedDateKey);
+      setDbInfo("opgeslagen", "ok");
     } catch (error) {
-      setOutput("Historische datum laden mislukt: " + error);
-      setDbInfo("historische datum fout", "bad");
-      log("Historische datum FOUT: " + error);
+      setDbInfo("laden fout", "bad");
+      log("Vier dagen laden FOUT: " + error);
     }
   }
 
@@ -751,26 +735,22 @@
 
     const title = card.querySelector("b");
     if (title) {
-      title.textContent = "Metingen";
+      title.textContent = "Gegevens";
     }
 
     const container = document.createElement("div");
     container.id = "hbDataFeatures";
     container.innerHTML = `
       <div style="margin-top:12px;padding-top:12px;border-top:1px solid #3a3a3a;">
-        <b>Alle metingen</b><br>
-        <button id="exportAllCsvButton" class="purple" type="button">Exporteer CSV</button>
-        <button id="importCsvButton" class="purple" type="button">Importeer CSV</button>
+        <button id="exportAllCsvButton" class="purple" type="button">Exporteer</button>
+        <button id="importCsvButton" class="purple" type="button">Importeer</button>
         <input id="importCsvInput" type="file" accept=".csv,text/csv" style="display:none;">
       </div>
       <div style="margin-top:12px;padding-top:12px;border-top:1px solid #3a3a3a;">
-        <b>Historische dag</b>
         <label>
-          Datum:
+          Toon:
           <input id="historyDate" type="date" style="width:auto;min-width:155px;">
         </label>
-        <button id="loadHistoryButton" class="purple" type="button">Toon geselecteerde dag</button>
-        <button id="returnTodayButton" class="gray" type="button" style="display:none;">Terug naar vandaag</button>
       </div>
     `;
 
@@ -794,10 +774,7 @@
       importCsvFile(event.target.files && event.target.files[0]);
     });
 
-    document.getElementById("loadHistoryButton")
-      .addEventListener("click", loadSelectedDate);
-    document.getElementById("returnTodayButton")
-      .addEventListener("click", returnToToday);
+    dateInput.addEventListener("change", loadSelectedDate);
 
     refreshDateBounds();
   }
