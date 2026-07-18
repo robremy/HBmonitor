@@ -31,7 +31,7 @@ Settings → Share HR → On
 Alle hartslagmetingen blijven lokaal in Chrome IndexedDB op het apparaat.
 Gebruik "Download CSV vandaag" om data te exporteren.
 
-## Versie 2026.07.18-v5
+## Versie 2026.07.18-v6
 
 - Vier hartslaggrafieken onder elkaar: vandaag en de drie voorgaande dagen.
 - Automatisch opnieuw verbinden na een onverwachte Web Bluetooth-verbreking.

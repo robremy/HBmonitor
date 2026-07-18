@@ -157,6 +157,45 @@
       margin-top: 10px;
     }
 
+
+    .chart-card-header {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      gap: 10px;
+      flex-wrap: wrap;
+    }
+
+    .chart-tools {
+      display: flex;
+      gap: 8px;
+    }
+
+    .chart-tools button {
+      margin: 0;
+      padding: 7px 10px;
+      font-size: 13px;
+    }
+
+    .card.chart-expanded {
+      position: fixed;
+      inset: 0;
+      z-index: 10000;
+      margin: 0;
+      border-radius: 0;
+      overflow: auto;
+      background: #181818;
+    }
+
+    .card.chart-expanded canvas {
+      height: calc(100dvh - 150px);
+      min-height: 360px;
+    }
+
+    canvas.hr-interactive {
+      touch-action: none;
+    }
+
     .legend {
       font-size: 14px;
       color: #ccc;
@@ -192,7 +231,7 @@
     <div id="lastDeviceInfo" class="status"></div>
     <div id="wakeLockInfo" class="status">Screen wakelock: niet actief</div>
     <div id="pwaInfo" class="status">PWA: initialiseren...</div>
-    <div id="softwareVersionInfo" class="status">Softwareversie: 2026.07.18-v5</div>
+    <div id="softwareVersionInfo" class="status">Softwareversie: 2026.07.18-v6</div>
     <div id="updateInfo" class="update-line" role="status" aria-live="polite">
       <strong>Nieuwe softwareversie beschikbaar.</strong><br>
       Werk bij wanneer de hartslagmeting veilig onderbroken kan worden.<br>
@@ -248,8 +287,14 @@
   </div>
 
   <div class="card">
-    <b>Hartslaggrafiek vandaag</b>
-    <canvas id="hrChart"></canvas>
+    <div class="chart-card-header">
+      <b>Hartslaggrafiek vandaag</b>
+      <div class="chart-tools">
+        <button type="button" onclick="resetChartZoom('hrChart')">Reset zoom</button>
+        <button type="button" onclick="toggleChartExpanded('hrChart', this)">Vergroot</button>
+      </div>
+    </div>
+    <canvas id="hrChart" class="hr-interactive"></canvas>
     <div class="legend">
       <span class="blue-dot">●</span> blauw = normaal /
       <span class="red-dot">●</span> rood = boven alarmwaarde
@@ -261,7 +306,7 @@
 <script>
 "use strict";
 
-const SOFTWARE_VERSION = "2026.07.18-v5";
+const SOFTWARE_VERSION = "2026.07.18-v6";
 
 const HR_SERVICE = "0000180d-0000-1000-8000-00805f9b34fb";
 const HR_MEASUREMENT = "00002a37-0000-1000-8000-00805f9b34fb";
@@ -1560,10 +1605,12 @@ function checkNewDay() {
 }
 
 function resizeCanvas(canvas) {
-  const ratio = window.devicePixelRatio || 1;
+  const ratio = Math.max(1, window.devicePixelRatio || 1);
   const rectangle = canvas.getBoundingClientRect();
-  const width = Math.max(300, Math.floor(rectangle.width * ratio));
-  const height = Math.floor(260 * ratio);
+  const cssWidth = Math.max(300, Math.floor(rectangle.width));
+  const cssHeight = Math.max(260, Math.floor(rectangle.height || 260));
+  const width = Math.floor(cssWidth * ratio);
+  const height = Math.floor(cssHeight * ratio);
 
   if (canvas.width !== width || canvas.height !== height) {
     canvas.width = width;
@@ -1573,22 +1620,38 @@ function resizeCanvas(canvas) {
   return { width, height, ratio };
 }
 
-function drawChart() {
-  const canvas = document.getElementById("hrChart");
-
-  if (!canvas) {
-    return;
+function getChartState(canvas) {
+  if (!canvas.__heartRateChartState) {
+    canvas.__heartRateChartState = { zoom: 1, center: 0.5 };
   }
+  return canvas.__heartRateChartState;
+}
+
+function getTimeTickStep(visibleSpanMs) {
+  const hours = visibleSpanMs / 3600000;
+  if (hours <= 4) return 30 * 60000;
+  if (hours <= 8) return 60 * 60000;
+  if (hours <= 16) return 2 * 3600000;
+  return 4 * 3600000;
+}
+
+function formatChartTime(time, stepMs) {
+  return new Date(time).toLocaleTimeString([], {
+    hour: "2-digit",
+    minute: stepMs < 3600000 ? "2-digit" : "2-digit"
+  });
+}
+
+function drawHeartRateCanvas(canvas, infoElement, sourceSamples, dateKey, isTodayChart = false) {
+  if (!canvas) return;
 
   const context = canvas.getContext("2d");
   const size = resizeCanvas(canvas);
-  const width = size.width;
-  const height = size.height;
-  const ratio = size.ratio;
-  const padLeft = 44 * ratio;
-  const padRight = 12 * ratio;
-  const padTop = 18 * ratio;
-  const padBottom = 34 * ratio;
+  const { width, height, ratio } = size;
+  const padLeft = 48 * ratio;
+  const padRight = 14 * ratio;
+  const padTop = 20 * ratio;
+  const padBottom = 38 * ratio;
   const chartWidth = width - padLeft - padRight;
   const chartHeight = height - padTop - padBottom;
 
@@ -1601,44 +1664,41 @@ function drawChart() {
   context.font = `${12 * ratio}px monospace`;
   context.fillStyle = "#bbbbbb";
 
-  if (todaySamples.length < 2) {
-    context.fillText(
-      "Nog onvoldoende metingen voor grafiek",
-      padLeft + 10 * ratio,
-      padTop + 30 * ratio
-    );
-    document.getElementById("chartInfo").textContent =
-      "Nog onvoldoende metingen.";
+  if (!sourceSamples || sourceSamples.length < 2) {
+    context.fillText("Nog onvoldoende metingen voor grafiek", padLeft + 10 * ratio, padTop + 30 * ratio);
+    if (infoElement) infoElement.textContent = dateKey ? "Geen of onvoldoende metingen voor " + dateKey + "." : "Nog onvoldoende metingen.";
     return;
   }
 
-  const samples = downsampleSamples(todaySamples, 4000);
+  const allSamples = downsampleSamples(sourceSamples, 8000);
   const limit = getLimit();
-  let minBpm = Math.min(...samples.map(sample => sample.bpm), limit);
-  let maxBpm = Math.max(...samples.map(sample => sample.bpm), limit);
+  let minBpm = Math.min(...allSamples.map(sample => sample.bpm), limit);
+  let maxBpm = Math.max(...allSamples.map(sample => sample.bpm), limit);
   minBpm = Math.max(30, Math.floor((minBpm - 5) / 5) * 5);
   maxBpm = Math.min(220, Math.ceil((maxBpm + 5) / 5) * 5);
+  if (maxBpm <= minBpm) maxBpm = minBpm + 10;
 
-  if (maxBpm <= minBpm) {
-    maxBpm = minBpm + 10;
-  }
+  const fullStart = allSamples[0].time;
+  const fullEnd = allSamples[allSamples.length - 1].time;
+  const fullSpan = Math.max(60000, fullEnd - fullStart);
+  const state = getChartState(canvas);
+  state.zoom = Math.min(16, Math.max(1, state.zoom));
+  state.center = Math.min(1, Math.max(0, state.center));
 
-  const startTime = samples[0].time;
-  const endTime = samples[samples.length - 1].time;
-  const timeSpan = Math.max(1, endTime - startTime);
+  const visibleSpan = fullSpan / state.zoom;
+  let visibleStart = fullStart + state.center * fullSpan - visibleSpan / 2;
+  visibleStart = Math.max(fullStart, Math.min(fullEnd - visibleSpan, visibleStart));
+  const visibleEnd = visibleStart + visibleSpan;
+  state.center = ((visibleStart + visibleEnd) / 2 - fullStart) / fullSpan;
 
-  const xFor = time =>
-    padLeft + ((time - startTime) / timeSpan) * chartWidth;
-  const yFor = bpm =>
-    padTop + (1 - ((bpm - minBpm) / (maxBpm - minBpm))) * chartHeight;
+  const xFor = time => padLeft + ((time - visibleStart) / visibleSpan) * chartWidth;
+  const yFor = bpm => padTop + (1 - ((bpm - minBpm) / (maxBpm - minBpm))) * chartHeight;
 
   context.strokeStyle = "#2b2b2b";
   context.lineWidth = 1 * ratio;
   context.fillStyle = "#bbbbbb";
-  const gridCount = 4;
-
-  for (let index = 0; index <= gridCount; index += 1) {
-    const bpm = minBpm + ((maxBpm - minBpm) / gridCount) * index;
+  for (let index = 0; index <= 4; index += 1) {
+    const bpm = minBpm + ((maxBpm - minBpm) / 4) * index;
     const y = yFor(bpm);
     context.beginPath();
     context.moveTo(padLeft, y);
@@ -1646,6 +1706,22 @@ function drawChart() {
     context.stroke();
     context.fillText(String(Math.round(bpm)), 6 * ratio, y + 4 * ratio);
   }
+
+  const tickStep = getTimeTickStep(visibleSpan);
+  const firstTick = Math.ceil(visibleStart / tickStep) * tickStep;
+  context.font = `${10 * ratio}px monospace`;
+  context.textAlign = "center";
+  for (let tick = firstTick; tick <= visibleEnd; tick += tickStep) {
+    const x = xFor(tick);
+    context.strokeStyle = "#262626";
+    context.beginPath();
+    context.moveTo(x, padTop);
+    context.lineTo(x, padTop + chartHeight);
+    context.stroke();
+    context.fillStyle = "#bbbbbb";
+    context.fillText(formatChartTime(tick, tickStep), x, height - 12 * ratio);
+  }
+  context.textAlign = "left";
 
   const limitY = yFor(limit);
   context.strokeStyle = "#ff4444";
@@ -1659,39 +1735,114 @@ function drawChart() {
   context.fillStyle = "#ff7777";
   context.fillText("grens " + limit, padLeft + 8 * ratio, limitY - 6 * ratio);
 
+  let plotted = allSamples.filter(sample => sample.time >= visibleStart && sample.time <= visibleEnd);
+  const before = [...allSamples].reverse().find(sample => sample.time < visibleStart);
+  const after = allSamples.find(sample => sample.time > visibleEnd);
+  if (before) plotted.unshift(before);
+  if (after) plotted.push(after);
+
+  context.save();
+  context.beginPath();
+  context.rect(padLeft, padTop, chartWidth, chartHeight);
+  context.clip();
   context.lineWidth = 2.5 * ratio;
   context.lineCap = "round";
   context.lineJoin = "round";
-
-  for (let index = 1; index < samples.length; index += 1) {
-    const previous = samples[index - 1];
-    const current = samples[index];
+  for (let index = 1; index < plotted.length; index += 1) {
+    const previous = plotted[index - 1];
+    const current = plotted[index];
     context.strokeStyle = current.bpm > limit ? "#f44336" : "#2196f3";
     context.beginPath();
     context.moveTo(xFor(previous.time), yFor(previous.bpm));
     context.lineTo(xFor(current.time), yFor(current.bpm));
     context.stroke();
   }
+  context.restore();
 
   context.fillStyle = "#bbbbbb";
   context.font = `${11 * ratio}px monospace`;
-  const firstLabel = new Date(startTime).toLocaleTimeString([], {
-    hour: "2-digit",
-    minute: "2-digit"
-  });
-  const lastLabel = new Date(endTime).toLocaleTimeString([], {
-    hour: "2-digit",
-    minute: "2-digit"
-  });
-  context.fillText(firstLabel, padLeft, height - 10 * ratio);
-  context.fillText(lastLabel, padLeft + chartWidth - 45 * ratio, height - 10 * ratio);
+  const scaleText = tickStep === 1800000 ? "30 min" : (tickStep / 3600000) + " uur";
+  context.fillText(`zoom ${state.zoom.toFixed(1)}× · schaal ${scaleText}`, padLeft, 14 * ratio);
 
-  const latest = samples[samples.length - 1].bpm;
-  const highCount = todaySamples.filter(sample => sample.bpm > limit).length;
-  document.getElementById("chartInfo").textContent =
-    "Metingen vandaag: " + todaySamples.length +
-    " | laatste: " + latest + " bpm" +
-    " | boven grens: " + highCount;
+  if (infoElement) {
+    const latest = sourceSamples[sourceSamples.length - 1].bpm;
+    const highCount = sourceSamples.filter(sample => sample.bpm > limit).length;
+    infoElement.textContent =
+      (isTodayChart ? "Metingen vandaag: " : "Metingen " + dateKey + ": ") + sourceSamples.length +
+      " | laatste: " + latest + " bpm" +
+      " | boven grens: " + highCount;
+  }
+}
+
+function bindChartInteraction(canvas, redraw) {
+  if (!canvas || canvas.__heartRateInteractionBound) return;
+  canvas.__heartRateInteractionBound = true;
+  canvas.classList.add("hr-interactive");
+
+  let pinchDistance = 0;
+  let startZoom = 1;
+  let startCenter = 0.5;
+
+  const distance = touches => Math.hypot(
+    touches[0].clientX - touches[1].clientX,
+    touches[0].clientY - touches[1].clientY
+  );
+
+  canvas.addEventListener("touchstart", event => {
+    if (event.touches.length !== 2) return;
+    event.preventDefault();
+    const state = getChartState(canvas);
+    pinchDistance = distance(event.touches);
+    startZoom = state.zoom;
+    startCenter = state.center;
+  }, { passive: false });
+
+  canvas.addEventListener("touchmove", event => {
+    if (event.touches.length !== 2 || !pinchDistance) return;
+    event.preventDefault();
+    const rectangle = canvas.getBoundingClientRect();
+    const midpoint = (event.touches[0].clientX + event.touches[1].clientX) / 2;
+    const focus = Math.min(1, Math.max(0, (midpoint - rectangle.left) / rectangle.width));
+    const nextZoom = Math.min(16, Math.max(1, startZoom * distance(event.touches) / pinchDistance));
+    const oldVisibleStart = startCenter - 0.5 / startZoom;
+    const focalPosition = oldVisibleStart + focus / startZoom;
+    const state = getChartState(canvas);
+    state.zoom = nextZoom;
+    state.center = focalPosition + (0.5 - focus) / nextZoom;
+    redraw();
+  }, { passive: false });
+
+  canvas.addEventListener("touchend", event => {
+    if (event.touches.length < 2) pinchDistance = 0;
+  });
+}
+
+function resetChartZoom(canvasId) {
+  const canvas = document.getElementById(canvasId);
+  if (!canvas) return;
+  canvas.__heartRateChartState = { zoom: 1, center: 0.5 };
+  if (typeof drawRecentDayCharts === "function") drawRecentDayCharts();
+  drawChart();
+}
+
+function toggleChartExpanded(canvasId, button) {
+  const canvas = document.getElementById(canvasId);
+  const card = canvas && canvas.closest(".card");
+  if (!card) return;
+  card.classList.toggle("chart-expanded");
+  button.textContent = card.classList.contains("chart-expanded") ? "Sluiten" : "Vergroot";
+  requestAnimationFrame(() => {
+    if (typeof drawRecentDayCharts === "function") drawRecentDayCharts();
+    drawChart();
+  });
+}
+
+function drawChart() {
+  const canvas = document.getElementById("hrChart");
+  const info = document.getElementById("chartInfo");
+  if (!canvas) return;
+  bindChartInteraction(canvas, drawChart);
+  drawHeartRateCanvas(canvas, info, todaySamples, currentDayKey, true);
 }
 
 // ============================================================
@@ -1699,6 +1850,7 @@ function drawChart() {
 // ============================================================
 
 window.addEventListener("resize", drawChart);
+window.visualViewport?.addEventListener("resize", drawChart);
 setInterval(checkNewDay, 60000);
 setInterval(updateStorageEstimate, 60000);
 setTimeout(drawChart, 500);

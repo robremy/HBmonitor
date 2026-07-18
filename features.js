@@ -170,8 +170,14 @@
       const card = document.createElement("div");
       card.className = "card";
       card.innerHTML = `
-        <b>${formatDayTitle(dateKey, daysAgo)}</b>
-        <canvas id="hrChartDay${daysAgo}"></canvas>
+        <div class="chart-card-header">
+          <b>${formatDayTitle(dateKey, daysAgo)}</b>
+          <div class="chart-tools">
+            <button type="button" onclick="resetChartZoom('hrChartDay${daysAgo}')">Reset zoom</button>
+            <button type="button" onclick="toggleChartExpanded('hrChartDay${daysAgo}', this)">Vergroot</button>
+          </div>
+        </div>
+        <canvas id="hrChartDay${daysAgo}" class="hr-interactive"></canvas>
         <div class="status">
           <span id="chartInfoDay${daysAgo}">Metingen laden...</span>
         </div>
@@ -183,109 +189,12 @@
   }
 
   function drawSamplesOnCanvas(canvas, info, samples, dateKey) {
-    if (!canvas || !info) {
-      return;
-    }
-
-    const context = canvas.getContext("2d");
-    const size = resizeCanvas(canvas);
-    const { width, height, ratio } = size;
-    const padLeft = 44 * ratio;
-    const padRight = 12 * ratio;
-    const padTop = 18 * ratio;
-    const padBottom = 34 * ratio;
-    const chartWidth = width - padLeft - padRight;
-    const chartHeight = height - padTop - padBottom;
-
-    context.clearRect(0, 0, width, height);
-    context.fillStyle = "#101010";
-    context.fillRect(0, 0, width, height);
-    context.strokeStyle = "#333333";
-    context.lineWidth = 1 * ratio;
-    context.strokeRect(padLeft, padTop, chartWidth, chartHeight);
-    context.font = `${12 * ratio}px monospace`;
-    context.fillStyle = "#bbbbbb";
-
-    if (!samples || samples.length < 2) {
-      context.fillText(
-        "Nog onvoldoende metingen voor grafiek",
-        padLeft + 10 * ratio,
-        padTop + 30 * ratio
-      );
-      info.textContent = "Geen of onvoldoende metingen voor " + dateKey + ".";
-      return;
-    }
-
-    const plotted = downsampleSamples(samples, 4000);
-    const limit = getLimit();
-    let minBpm = Math.min(...plotted.map(sample => sample.bpm), limit);
-    let maxBpm = Math.max(...plotted.map(sample => sample.bpm), limit);
-    minBpm = Math.max(30, Math.floor((minBpm - 5) / 5) * 5);
-    maxBpm = Math.min(220, Math.ceil((maxBpm + 5) / 5) * 5);
-    if (maxBpm <= minBpm) {
-      maxBpm = minBpm + 10;
-    }
-
-    const startTime = plotted[0].time;
-    const endTime = plotted[plotted.length - 1].time;
-    const timeSpan = Math.max(1, endTime - startTime);
-    const xFor = time => padLeft + ((time - startTime) / timeSpan) * chartWidth;
-    const yFor = bpm => padTop + (1 - ((bpm - minBpm) / (maxBpm - minBpm))) * chartHeight;
-
-    context.strokeStyle = "#2b2b2b";
-    context.lineWidth = 1 * ratio;
-    context.fillStyle = "#bbbbbb";
-    for (let index = 0; index <= 4; index += 1) {
-      const bpm = minBpm + ((maxBpm - minBpm) / 4) * index;
-      const y = yFor(bpm);
-      context.beginPath();
-      context.moveTo(padLeft, y);
-      context.lineTo(padLeft + chartWidth, y);
-      context.stroke();
-      context.fillText(String(Math.round(bpm)), 6 * ratio, y + 4 * ratio);
-    }
-
-    const limitY = yFor(limit);
-    context.strokeStyle = "#ff4444";
-    context.lineWidth = 1.5 * ratio;
-    context.setLineDash([6 * ratio, 5 * ratio]);
-    context.beginPath();
-    context.moveTo(padLeft, limitY);
-    context.lineTo(padLeft + chartWidth, limitY);
-    context.stroke();
-    context.setLineDash([]);
-    context.fillStyle = "#ff7777";
-    context.fillText("grens " + limit, padLeft + 8 * ratio, limitY - 6 * ratio);
-
-    context.lineWidth = 2.5 * ratio;
-    context.lineCap = "round";
-    context.lineJoin = "round";
-    for (let index = 1; index < plotted.length; index += 1) {
-      const previous = plotted[index - 1];
-      const current = plotted[index];
-      context.strokeStyle = current.bpm > limit ? "#f44336" : "#2196f3";
-      context.beginPath();
-      context.moveTo(xFor(previous.time), yFor(previous.bpm));
-      context.lineTo(xFor(current.time), yFor(current.bpm));
-      context.stroke();
-    }
-
-    context.fillStyle = "#bbbbbb";
-    context.font = `${11 * ratio}px monospace`;
-    const firstLabel = new Date(startTime).toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" });
-    const lastLabel = new Date(endTime).toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" });
-    context.fillText(firstLabel, padLeft, height - 10 * ratio);
-    context.fillText(lastLabel, padLeft + chartWidth - 45 * ratio, height - 10 * ratio);
-
-    const latest = plotted[plotted.length - 1].bpm;
-    const highCount = samples.filter(sample => sample.bpm > limit).length;
-    info.textContent =
-      "Metingen " + dateKey + ": " + samples.length +
-      " | laatste: " + latest + " bpm" +
-      " | boven grens: " + highCount;
+    if (!canvas || !info) return;
+    bindChartInteraction(canvas, drawRecentDayCharts);
+    drawHeartRateCanvas(canvas, info, samples, dateKey, false);
   }
 
-  function drawRecentDayCharts() {
+  const drawRecentDayCharts = window.drawRecentDayCharts = function drawRecentDayCharts() {
     for (let daysAgo = 1; daysAgo < RECENT_DAY_COUNT; daysAgo += 1) {
       const dateKey = dateKeyDaysAgo(daysAgo);
       drawSamplesOnCanvas(
