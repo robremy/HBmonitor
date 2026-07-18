@@ -42,8 +42,23 @@
     }
 
     h1 {
-      font-size: 22px;
-      margin: 0 0 12px 0;
+      font-size: 44px;
+      line-height: 1.05;
+      margin: 0;
+    }
+
+    .app-title {
+      display: flex;
+      align-items: center;
+      gap: 14px;
+      margin-bottom: 14px;
+    }
+
+    .app-logo {
+      width: 56px;
+      height: 56px;
+      border-radius: 14px;
+      flex: 0 0 auto;
     }
 
     .bpm {
@@ -90,9 +105,9 @@
     button.purple { background: #6a1b9a; }
 
     input {
-      font-size: 20px;
-      width: 95px;
-      padding: 8px;
+      font-size: 18px;
+      width: 72px;
+      padding: 6px;
       border-radius: 8px;
       border: 1px solid #555;
       background: #111;
@@ -224,14 +239,16 @@
 
 <body>
   <div id="mainCard" class="card">
-    <h1>Heart Rate Alert</h1>
-    <div id="bpm" class="bpm">--</div>
+    <div class="app-title">
+      <img class="app-logo" src="./icon-192.png" alt="Heart Rate Alert-logo">
+      <h1>Heart Rate Alert</h1>
+    </div>
+    <div id="bpm" class="bpm" hidden>--</div>
     <div id="contact" class="status">Contact: niet gedetecteerd</div>
     <div id="deviceName" class="status"></div>
     <div id="lastDeviceInfo" class="status"></div>
     <div id="wakeLockInfo" class="status">Screen wakelock: niet actief</div>
-    <div id="pwaInfo" class="status">PWA: initialiseren...</div>
-    <div id="softwareVersionInfo" class="status">Softwareversie: 2026.07.18-v11</div>
+    <div id="softwareVersionInfo" class="status">Softwareversie: 2026.07.18-v12</div>
     <div id="updateInfo" class="update-line" role="status" aria-live="polite">
       <strong>Nieuwe softwareversie beschikbaar.</strong><br>
       Werk bij wanneer de hartslagmeting veilig onderbroken kan worden.<br>
@@ -253,18 +270,19 @@
     <button id="installBtn" class="purple" onclick="installPwa()" style="display:none;">Installeer app</button>
 
     <label>
-      Alarmgrens bpm:
+      Alarmgrens:
       <input id="limit" type="number" value="76" min="30" max="220" oninput="drawChart()">
+      bpm
     </label>
 
     <label>
-      Minimale duur grensoverschrijding:
+      Min. duur grensoverschrijding:
       <input id="secondsHigh" type="number" value="10" min="1" max="300">
       sec
     </label>
 
     <label>
-      Cooldown tussen alarmen:
+      Alarm cooldown:
       <input id="cooldown" type="number" value="30" min="5" max="600">
       sec
     </label>
@@ -306,7 +324,7 @@
 <script>
 "use strict";
 
-const SOFTWARE_VERSION = "2026.07.18-v11";
+const SOFTWARE_VERSION = "2026.07.18-v12";
 
 const HR_SERVICE = "0000180d-0000-1000-8000-00805f9b34fb";
 const HR_MEASUREMENT = "00002a37-0000-1000-8000-00805f9b34fb";
@@ -385,6 +403,7 @@ function setDbInfo(message, className = "") {
 
 function setPwaInfo(message, className = "") {
   const element = document.getElementById("pwaInfo");
+  if (!element) return;
   element.textContent = "PWA: " + message;
   element.className = "status " + className;
 }
@@ -517,7 +536,7 @@ async function registerServiceWorker() {
   }
 
   try {
-    const registration = await navigator.serviceWorker.register("./sw.js?v=2026.07.18-v11", {
+    const registration = await navigator.serviceWorker.register("./sw.js?v=2026.07.18-v12", {
       scope: "./",
       updateViaCache: "none"
     });
@@ -588,15 +607,8 @@ async function updateStorageEstimate() {
       ? Math.round(estimate.quota / 1024 / 1024)
       : "?";
 
-    let persistedText = "";
-
-    if (navigator.storage.persisted) {
-      const persisted = await navigator.storage.persisted();
-      persistedText = persisted ? " | persistent" : " | niet persistent";
-    }
-
     setStorageInfo(
-      usedMb + " MB gebruikt / " + quotaMb + " MB quota" + persistedText,
+      usedMb + " MB gebruikt / " + quotaMb + " MB quota",
       "ok"
     );
   } catch (error) {
@@ -2076,6 +2088,6 @@ window.addEventListener("load", async () => {
   }, 1000);
 });
 </script>
-  <script src="./features.js?v=2026.07.18-v11"></script>
+  <script src="./features.js?v=2026.07.18-v12"></script>
 </body>
 </html>

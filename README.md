@@ -31,7 +31,7 @@ Settings → Share HR → On
 Alle hartslagmetingen blijven lokaal in Chrome IndexedDB op het apparaat.
 Gebruik "Download CSV vandaag" om data te exporteren.
 
-## Versie 2026.07.18-v11
+## Versie 2026.07.18-v12
 
 - Pinch-zoom rond het aangeraakte tijdstip.
 - Horizontaal schuiven met één vinger wanneer ingezoomd.
