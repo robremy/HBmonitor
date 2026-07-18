@@ -318,7 +318,7 @@
     <div id="deviceName" class="status"></div>
     <div id="lastDeviceInfo" class="status"></div>
     <div id="wakeLockInfo" class="status">Screen wakelock: niet actief</div>
-    <div id="softwareVersionInfo" class="status">Softwareversie: 2026.07.18-v15</div>
+    <div id="softwareVersionInfo" class="status">Softwareversie: 2026.07.18-v17</div>
     <div id="updateInfo" class="update-line" role="status" aria-live="polite">
       <strong>Nieuwe softwareversie beschikbaar.</strong><br>
       Werk bij wanneer de hartslagmeting veilig onderbroken kan worden.<br>
@@ -423,7 +423,7 @@
 <script>
 "use strict";
 
-const SOFTWARE_VERSION = "2026.07.18-v15";
+const SOFTWARE_VERSION = "2026.07.18-v17";
 
 const HR_SERVICE = "0000180d-0000-1000-8000-00805f9b34fb";
 const HR_MEASUREMENT = "00002a37-0000-1000-8000-00805f9b34fb";
@@ -705,7 +705,7 @@ async function registerServiceWorker() {
   }
 
   try {
-    const registration = await navigator.serviceWorker.register("./sw.js?v=2026.07.18-v15", {
+    const registration = await navigator.serviceWorker.register("./sw.js?v=2026.07.18-v17", {
       scope: "./",
       updateViaCache: "none"
     });
@@ -1620,12 +1620,13 @@ function formatLastStorageTime(date) {
     year: "numeric",
     hour: "2-digit",
     minute: "2-digit",
+    second: "2-digit",
     hour12: false
   }).formatToParts(date);
   const values = Object.fromEntries(parts.map(part => [part.type, part.value]));
   const weekday = (values.weekday || "").replace(".", "");
   const month = (values.month || "").replace(".", "");
-  return `${weekday} ${values.day} ${month} ${values.year} ${values.hour}.${values.minute}`;
+  return `${weekday} ${values.day} ${month} ${values.year} ${values.hour}:${values.minute}:${values.second}`;
 }
 
 async function onHeartRate(event) {
@@ -2268,8 +2269,18 @@ function updateAnnotationInMemory(sampleId, annotation) {
       if (sample.id === sampleId) sample.annotation = annotation;
     }
   };
+
   update(todaySamples);
   if (typeof historicalSamples !== "undefined") update(historicalSamples);
+
+  // De vierdagengrafieken bewaren elk hun eigen kopie van de meetpunten.
+  // Werk daarom ook die caches bij, zodat een redraw (bijvoorbeeld na export,
+  // schermrotatie of terugkeer uit de downloadweergave) de annotatie niet wist.
+  if (typeof recentDaySamples !== "undefined" && recentDaySamples instanceof Map) {
+    for (const samples of recentDaySamples.values()) {
+      update(samples);
+    }
+  }
 }
 
 function openAnnotationDialog(sample, redraw) {
@@ -2530,6 +2541,6 @@ window.addEventListener("load", async () => {
   }, 1000);
 });
 </script>
-  <script src="./features.js?v=2026.07.18-v15"></script>
+  <script src="./features.js?v=2026.07.18-v17"></script>
 </body>
 </html>
