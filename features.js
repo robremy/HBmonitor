@@ -1,6 +1,6 @@
 /*
  * HBmonitor gegevensbeheer en historische grafieken
- * Versie: 2026.07.17-v1
+ * Versie: 2026.07.17-v2
  *
  * Functies:
  * - Export van alle opgeslagen dagen naar één CSV-bestand
@@ -11,7 +11,7 @@
 "use strict";
 
 (() => {
-  const FEATURE_VERSION = "2026.07.17-v1";
+  const FEATURE_VERSION = "2026.07.17-v2";
   const CSV_HEADERS = [
     "id",
     "ts_ms",
@@ -297,6 +297,16 @@
     }
   }
 
+  async function waitForIndexedDb(timeoutMs = 10000) {
+    const startedAt = Date.now();
+    while (!db) {
+      if (Date.now() - startedAt >= timeoutMs) {
+        throw new Error("IndexedDB is niet tijdig geopend");
+      }
+      await new Promise(resolve => setTimeout(resolve, 100));
+    }
+  }
+
   async function loadRecentDayCharts() {
     if (recentChartsLoadPromise) {
       return recentChartsLoadPromise;
@@ -304,6 +314,7 @@
 
     recentChartsLoadPromise = (async () => {
       createRecentCharts();
+      await waitForIndexedDb();
       for (let daysAgo = 1; daysAgo < RECENT_DAY_COUNT; daysAgo += 1) {
         const dateKey = dateKeyDaysAgo(daysAgo);
         const rows = await getSamplesByDate(dateKey);
@@ -671,6 +682,7 @@
       const imported = await writeImportedSamples(normalizedSamples);
       await updateStorageEstimate();
       await refreshDateBounds();
+      await loadRecentDayCharts();
 
       if (selectedDateKey === getDayKey(new Date())) {
         await loadTodayFromIndexedDb();
@@ -798,7 +810,11 @@
     setFeatureVersion();
     createInterface();
     refreshDateBounds();
-    await loadRecentDayCharts();
+    try {
+      await loadRecentDayCharts();
+    } catch (error) {
+      log("Historische daggrafieken laden FOUT: " + error);
+    }
     drawChart();
     log("Gegevensfuncties actief: vier daggrafieken, CSV alle dagen, CSV-import en historische datums");
   });
