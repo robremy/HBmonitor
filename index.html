@@ -231,7 +231,7 @@
     <div id="lastDeviceInfo" class="status"></div>
     <div id="wakeLockInfo" class="status">Screen wakelock: niet actief</div>
     <div id="pwaInfo" class="status">PWA: initialiseren...</div>
-    <div id="softwareVersionInfo" class="status">Softwareversie: 2026.07.18-v9</div>
+    <div id="softwareVersionInfo" class="status">Softwareversie: 2026.07.18-v11</div>
     <div id="updateInfo" class="update-line" role="status" aria-live="polite">
       <strong>Nieuwe softwareversie beschikbaar.</strong><br>
       Werk bij wanneer de hartslagmeting veilig onderbroken kan worden.<br>
@@ -306,7 +306,7 @@
 <script>
 "use strict";
 
-const SOFTWARE_VERSION = "2026.07.18-v9";
+const SOFTWARE_VERSION = "2026.07.18-v11";
 
 const HR_SERVICE = "0000180d-0000-1000-8000-00805f9b34fb";
 const HR_MEASUREMENT = "00002a37-0000-1000-8000-00805f9b34fb";
@@ -517,7 +517,7 @@ async function registerServiceWorker() {
   }
 
   try {
-    const registration = await navigator.serviceWorker.register("./sw.js", {
+    const registration = await navigator.serviceWorker.register("./sw.js?v=2026.07.18-v11", {
       scope: "./",
       updateViaCache: "none"
     });
@@ -1627,19 +1627,32 @@ function getChartState(canvas) {
   return canvas.__heartRateChartState;
 }
 
-function getTimeTickStep(visibleSpanMs) {
-  const hours = visibleSpanMs / 3600000;
-  if (hours <= 4) return 30 * 60000;
-  if (hours <= 8) return 60 * 60000;
-  if (hours <= 16) return 2 * 3600000;
-  return 4 * 3600000;
+function getTimeTickStep(visibleSpanMs, chartWidthCss) {
+  // Kies automatisch een leesbare tijdschaal voor het zichtbare deel.
+  // Bij sterk inzoomen loopt de schaal door van uren naar minuten en seconden.
+  const candidateSteps = [
+    1000, 2000, 5000, 10000, 15000, 30000,
+    60000, 2 * 60000, 5 * 60000, 10 * 60000, 15 * 60000, 30 * 60000,
+    60 * 60000, 2 * 3600000, 4 * 3600000
+  ];
+  const maxTicks = Math.max(3, Math.floor(chartWidthCss / 72));
+  const minimumStep = visibleSpanMs / maxTicks;
+  return candidateSteps.find(step => step >= minimumStep) || candidateSteps[candidateSteps.length - 1];
 }
 
 function formatChartTime(time, stepMs) {
-  return new Date(time).toLocaleTimeString([], {
+  const options = {
     hour: "2-digit",
-    minute: stepMs < 3600000 ? "2-digit" : "2-digit"
-  });
+    minute: "2-digit"
+  };
+  if (stepMs < 60000) options.second = "2-digit";
+  return new Date(time).toLocaleTimeString([], options);
+}
+
+function formatTimeScale(stepMs) {
+  if (stepMs < 60000) return `${stepMs / 1000} sec`;
+  if (stepMs < 3600000) return `${stepMs / 60000} min`;
+  return `${stepMs / 3600000} uur`;
 }
 
 function drawHeartRateCanvas(canvas, infoElement, sourceSamples, dateKey, isTodayChart = false) {
@@ -1707,7 +1720,7 @@ function drawHeartRateCanvas(canvas, infoElement, sourceSamples, dateKey, isToda
     context.fillText(String(Math.round(bpm)), 6 * ratio, y + 4 * ratio);
   }
 
-  const tickStep = getTimeTickStep(visibleSpan);
+  const tickStep = getTimeTickStep(visibleSpan, chartWidth / ratio);
   const firstTick = Math.ceil(visibleStart / tickStep) * tickStep;
   context.font = `${10 * ratio}px monospace`;
   context.textAlign = "center";
@@ -1838,7 +1851,7 @@ function drawHeartRateCanvas(canvas, infoElement, sourceSamples, dateKey, isToda
 
   context.fillStyle = "#bbbbbb";
   context.font = `${11 * ratio}px monospace`;
-  const scaleText = tickStep === 1800000 ? "30 min" : (tickStep / 3600000) + " uur";
+  const scaleText = formatTimeScale(tickStep);
   context.fillText(`zoom ${state.zoom.toFixed(1)}× · schaal ${scaleText}`, padLeft, 14 * ratio);
 
   if (infoElement) {
@@ -2063,6 +2076,6 @@ window.addEventListener("load", async () => {
   }, 1000);
 });
 </script>
-  <script src="./features.js"></script>
+  <script src="./features.js?v=2026.07.18-v11"></script>
 </body>
 </html>

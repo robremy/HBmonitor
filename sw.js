@@ -5,16 +5,16 @@
  * Gebruik in index.html dezelfde SOFTWARE_VERSION.
  */
 
-const APP_VERSION = "2026.07.18-v9";
-const CACHE_PREFIX = "xiaomi-band10-hr-pwa-";
+const APP_VERSION = "2026.07.18-v11";
+const CACHE_PREFIX = "heart-rate-alert-cache-";
 const CACHE_NAME = CACHE_PREFIX + APP_VERSION;
-const OFFLINE_PAGE = "./index.html";
+const OFFLINE_PAGE = "./index.html?v=2026.07.18-v11";
 
 const APP_FILES = [
   "./",
-  "./index.html",
-  "./features.js",
-  "./manifest.webmanifest",
+  "./index.html?v=2026.07.18-v11",
+  "./features.js?v=2026.07.18-v11",
+  "./manifest.webmanifest?v=2026.07.18-v11",
   "./icon-192.png",
   "./icon-512.png"
 ];
@@ -34,7 +34,8 @@ self.addEventListener("activate", event => {
     await Promise.all(
       cacheNames
         .filter(cacheName =>
-          cacheName.startsWith(CACHE_PREFIX) &&
+          (cacheName.startsWith(CACHE_PREFIX) ||
+           cacheName.startsWith("xiaomi-band10-hr-pwa-")) &&
           cacheName !== CACHE_NAME
         )
         .map(cacheName => caches.delete(cacheName))
