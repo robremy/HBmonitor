@@ -5,16 +5,16 @@
  * Gebruik in index.html dezelfde SOFTWARE_VERSION.
  */
 
-const APP_VERSION = "2026.07.18-v13";
+const APP_VERSION = "2026.07.18-v14";
 const CACHE_PREFIX = "heart-rate-alert-cache-";
 const CACHE_NAME = CACHE_PREFIX + APP_VERSION;
-const OFFLINE_PAGE = "./index.html?v=2026.07.18-v13";
+const OFFLINE_PAGE = "./index.html?v=2026.07.18-v14";
 
 const APP_FILES = [
   "./",
-  "./index.html?v=2026.07.18-v13",
-  "./features.js?v=2026.07.18-v13",
-  "./manifest.webmanifest?v=2026.07.18-v13",
+  "./index.html?v=2026.07.18-v14",
+  "./features.js?v=2026.07.18-v14",
+  "./manifest.webmanifest?v=2026.07.18-v14",
   "./icon-192.png",
   "./icon-512.png"
 ];

@@ -287,7 +287,7 @@
     <div id="deviceName" class="status"></div>
     <div id="lastDeviceInfo" class="status"></div>
     <div id="wakeLockInfo" class="status">Screen wakelock: niet actief</div>
-    <div id="softwareVersionInfo" class="status">Softwareversie: 2026.07.18-v13</div>
+    <div id="softwareVersionInfo" class="status">Softwareversie: 2026.07.18-v14</div>
     <div id="updateInfo" class="update-line" role="status" aria-live="polite">
       <strong>Nieuwe softwareversie beschikbaar.</strong><br>
       Werk bij wanneer de hartslagmeting veilig onderbroken kan worden.<br>
@@ -386,7 +386,7 @@
 <script>
 "use strict";
 
-const SOFTWARE_VERSION = "2026.07.18-v13";
+const SOFTWARE_VERSION = "2026.07.18-v14";
 
 const HR_SERVICE = "0000180d-0000-1000-8000-00805f9b34fb";
 const HR_MEASUREMENT = "00002a37-0000-1000-8000-00805f9b34fb";
@@ -598,7 +598,7 @@ async function registerServiceWorker() {
   }
 
   try {
-    const registration = await navigator.serviceWorker.register("./sw.js?v=2026.07.18-v13", {
+    const registration = await navigator.serviceWorker.register("./sw.js?v=2026.07.18-v14", {
       scope: "./",
       updateViaCache: "none"
     });
@@ -1779,7 +1779,7 @@ function drawHeartRateCanvas(canvas, infoElement, sourceSamples, dateKey, isToda
   const { width, height, ratio } = size;
   const padLeft = 48 * ratio;
   const padRight = 14 * ratio;
-  const padTop = 20 * ratio;
+  const padTop = 44 * ratio;
   const padBottom = 38 * ratio;
   const chartWidth = width - padLeft - padRight;
   const chartHeight = height - padTop - padBottom;
@@ -1887,6 +1887,90 @@ function drawHeartRateCanvas(canvas, infoElement, sourceSamples, dateKey, isToda
     context.stroke();
   }
   context.restore();
+
+  // Annotaties blijven altijd zichtbaar in een smalle strook boven de grafiek.
+  const annotationIcons = {
+    "Rust": "🛋",
+    "Lopen": "🚶",
+    "Staan": "🧍",
+    "Eten": "🍽",
+    "Douchen": "🚿",
+    "Stress": "⚡",
+    "Klachten": "⚠",
+    "Medicatie": "💊",
+    "Overig": "📝"
+  };
+  const annotatedSamples = sourceSamples
+    .filter(sample => sample.annotation && sample.time >= visibleStart && sample.time <= visibleEnd)
+    .sort((a, b) => a.time - b.time);
+
+  if (annotatedSamples.length) {
+    const markerY = padTop - 15 * ratio;
+    const minimumMarkerDistance = 26 * ratio;
+    const clusters = [];
+
+    for (const sample of annotatedSamples) {
+      const sampleX = xFor(sample.time);
+      const lastCluster = clusters[clusters.length - 1];
+      if (lastCluster && sampleX - lastCluster.lastX < minimumMarkerDistance) {
+        lastCluster.samples.push(sample);
+        lastCluster.lastX = sampleX;
+        lastCluster.x = lastCluster.samples.reduce((sum, item) => sum + xFor(item.time), 0) / lastCluster.samples.length;
+      } else {
+        clusters.push({ x: sampleX, lastX: sampleX, samples: [sample] });
+      }
+    }
+
+    context.save();
+    context.font = `${12 * ratio}px system-ui, sans-serif`;
+    context.textAlign = "center";
+    context.textBaseline = "middle";
+
+    for (const cluster of clusters) {
+      const representative = cluster.samples[0];
+      const markerX = cluster.x;
+      const pointY = yFor(representative.bpm);
+
+      context.strokeStyle = "rgba(255, 193, 7, 0.42)";
+      context.lineWidth = 1 * ratio;
+      context.setLineDash([3 * ratio, 4 * ratio]);
+      context.beginPath();
+      context.moveTo(markerX, markerY + 9 * ratio);
+      context.lineTo(markerX, pointY);
+      context.stroke();
+      context.setLineDash([]);
+
+      context.fillStyle = "#ffc107";
+      context.beginPath();
+      context.arc(markerX, markerY, 9 * ratio, 0, Math.PI * 2);
+      context.fill();
+      context.strokeStyle = "#5a4300";
+      context.stroke();
+
+      context.fillStyle = "#111111";
+      const markerText = cluster.samples.length > 1
+        ? String(cluster.samples.length)
+        : (annotationIcons[representative.annotation] || "•");
+      context.fillText(markerText, markerX, markerY + 0.5 * ratio);
+
+      // Bij voldoende zoom wordt de korte annotatietekst ook zichtbaar.
+      if (state.zoom >= 8 && cluster.samples.length === 1) {
+        const label = representative.annotation;
+        context.font = `${10 * ratio}px system-ui, sans-serif`;
+        const labelWidth = context.measureText(label).width + 8 * ratio;
+        let labelX = markerX + 13 * ratio;
+        if (labelX + labelWidth > padLeft + chartWidth) labelX = markerX - labelWidth - 13 * ratio;
+        context.fillStyle = "rgba(30,30,30,0.92)";
+        context.fillRect(labelX, markerY - 8 * ratio, labelWidth, 16 * ratio);
+        context.fillStyle = "#ffffff";
+        context.textAlign = "left";
+        context.fillText(label, labelX + 4 * ratio, markerY);
+        context.textAlign = "center";
+        context.font = `${12 * ratio}px system-ui, sans-serif`;
+      }
+    }
+    context.restore();
+  }
 
   canvas.__heartRateChartGeometry = {
     padLeft,
@@ -2277,6 +2361,6 @@ window.addEventListener("load", async () => {
   }, 1000);
 });
 </script>
-  <script src="./features.js?v=2026.07.18-v13"></script>
+  <script src="./features.js?v=2026.07.18-v14"></script>
 </body>
 </html>
