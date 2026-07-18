@@ -181,12 +181,12 @@
   <div id="mainCard" class="card">
     <h1>Xiaomi Smart Band 10 hartslag alarm PWA</h1>
     <div id="bpm" class="bpm">--</div>
-    <div id="contact" class="status">Nog niet verbonden</div>
+    <div id="contact" class="status">Status: niet verbonden</div>
     <div id="deviceName" class="status"></div>
     <div id="lastDeviceInfo" class="status"></div>
-    <div id="wakeLockInfo" class="status"></div>
+    <div id="wakeLockInfo" class="status">Screen wakelock: niet actief</div>
     <div id="pwaInfo" class="status">PWA: initialiseren...</div>
-    <div id="softwareVersionInfo" class="status">Softwareversie: 2026.07.18-v1</div>
+    <div id="softwareVersionInfo" class="status">Softwareversie: 2026.07.18-v2</div>
     <div id="updateInfo" class="update-line" role="status" aria-live="polite">
       <strong>Nieuwe softwareversie beschikbaar.</strong><br>
       Werk bij wanneer de hartslagmeting veilig onderbroken kan worden.<br>
@@ -194,7 +194,7 @@
         Nu bijwerken
       </button>
     </div>
-    <div id="dbInfo" class="status">IndexedDB: initialiseren...</div>
+    <div id="dbInfo" class="status">Metingen: initialiseren...</div>
     <div id="storageInfo" class="status">Opslag: controleren...</div>
   </div>
 
@@ -233,8 +233,7 @@
   </div>
 
   <div class="card">
-    <b>IndexedDB opvragen</b><br>
-    <button class="purple" onclick="loadTodayFromIndexedDb()">Laad vandaag uit IndexedDB</button>
+    <b>Metingen</b><br>
     <button class="purple" onclick="showStatsToday()">Stats vandaag</button>
     <button class="red" onclick="deleteTodayConfirm()">Verwijder vandaag</button>
     <pre id="queryOutput">Nog niets opgevraagd.</pre>
@@ -243,6 +242,10 @@
   <div class="card">
     <b>Log</b>
     <pre id="log"></pre>
+  </div>
+
+  <div class="card">
+    <b>Hartslag: <span id="currentHeartRate">-- bpm</span></b>
   </div>
 
   <div class="card">
@@ -259,7 +262,7 @@
 <script>
 "use strict";
 
-const SOFTWARE_VERSION = "2026.07.18-v1";
+const SOFTWARE_VERSION = "2026.07.18-v2";
 
 const HR_SERVICE = "0000180d-0000-1000-8000-00805f9b34fb";
 const HR_MEASUREMENT = "00002a37-0000-1000-8000-00805f9b34fb";
@@ -332,7 +335,7 @@ function setStatus(message, className = "") {
 
 function setDbInfo(message, className = "") {
   const element = document.getElementById("dbInfo");
-  element.textContent = "IndexedDB: " + message;
+  element.textContent = "Metingen: " + message;
   element.className = "status " + className;
 }
 
@@ -632,7 +635,7 @@ function openIndexedDb() {
         alert("Nieuwe databaseversie beschikbaar. Sluit en open de app opnieuw.");
       };
 
-      setDbInfo("klaar", "ok");
+      setDbInfo("opgeslagen", "ok");
       resolve(db);
     };
 
@@ -984,13 +987,13 @@ async function requestScreenWakeLock() {
 
   try {
     if (!("wakeLock" in navigator)) {
-      element.textContent = "Browser screen WakeLock niet ondersteund";
+      element.textContent = "Screen wakelock: niet ondersteund";
       log("Browser screen WakeLock niet ondersteund");
       return;
     }
 
     if (screenWakeLock !== null) {
-      element.textContent = "Browser screen WakeLock actief";
+      element.textContent = "Screen wakelock: actief";
       return;
     }
 
@@ -999,14 +1002,14 @@ async function requestScreenWakeLock() {
     screenWakeLock.addEventListener("release", () => {
       screenWakeLock = null;
       document.getElementById("wakeLockInfo").textContent =
-        "Browser screen WakeLock vrijgegeven";
+        "Screen wakelock: niet actief";
       log("Browser screen WakeLock vrijgegeven");
     });
 
-    element.textContent = "Browser screen WakeLock actief";
+    element.textContent = "Screen wakelock: actief";
     log("Browser screen WakeLock actief");
   } catch (error) {
-    element.textContent = "Browser screen WakeLock niet actief";
+    element.textContent = "Screen wakelock: niet actief";
     log("Browser screen WakeLock fout: " + error);
   }
 }
@@ -1186,6 +1189,7 @@ async function connectToDevice(selectedDevice, storeDevice) {
   }
 
   log("Live hartslag gestart");
+  document.getElementById("contact").textContent = "Status: verbonden";
   setStatus("Verbonden. Wacht op hartslag...", "ok");
 }
 
@@ -1300,7 +1304,7 @@ function onDisconnected() {
   }
 
   log("Bluetooth verbinding onverwacht verbroken; automatisch herstel gestart");
-  document.getElementById("contact").textContent = "Verbinding verbroken";
+  document.getElementById("contact").textContent = "Status: niet verbonden";
   setStatus("Verbinding verbroken. Automatisch herstel gestart.", "bad");
   scheduleReconnect(true);
 }
@@ -1366,7 +1370,8 @@ async function onHeartRate(event) {
 
   const parsed = parseHeartRate(event.target.value);
   document.getElementById("bpm").textContent = parsed.bpm;
-  document.getElementById("contact").textContent = parsed.contact;
+  document.getElementById("contact").textContent = "Status: verbonden";
+  document.getElementById("currentHeartRate").textContent = parsed.bpm + " bpm";
 
   const now = new Date();
   const limit = getLimit();

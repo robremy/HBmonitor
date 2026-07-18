@@ -1,6 +1,6 @@
 /*
  * HBmonitor gegevensbeheer en historische grafieken
- * Versie: 2026.07.18-v1
+ * Versie: 2026.07.18-v2
  *
  * Functies:
  * - Export van alle opgeslagen dagen naar één CSV-bestand
@@ -11,7 +11,7 @@
 "use strict";
 
 (() => {
-  const FEATURE_VERSION = "2026.07.18-v1";
+  const FEATURE_VERSION = "2026.07.18-v2";
   const CSV_HEADERS = [
     "id",
     "ts_ms",
@@ -751,7 +751,7 @@
 
     const title = card.querySelector("b");
     if (title) {
-      title.textContent = "IndexedDB, import, export en historie";
+      title.textContent = "Metingen";
     }
 
     const container = document.createElement("div");
