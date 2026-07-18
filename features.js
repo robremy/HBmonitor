@@ -11,7 +11,7 @@
 "use strict";
 
 (() => {
-  const FEATURE_VERSION = "2026.07.18-v3";
+  const FEATURE_VERSION = "2026.07.18-v4";
   const CSV_HEADERS = [
     "id",
     "ts_ms",
@@ -353,7 +353,6 @@
     try {
       await loadRecentDayCharts();
       log("Vier dagen geladen vanaf " + selectedDateKey);
-      setDbInfo("opgeslagen", "ok");
     } catch (error) {
       setDbInfo("laden fout", "bad");
       log("Vier dagen laden FOUT: " + error);
@@ -790,9 +789,9 @@
     try {
       await loadRecentDayCharts();
     } catch (error) {
-      log("Historische daggrafieken laden FOUT: " + error);
+      log("Vier daggrafieken laden FOUT: " + error);
     }
     drawChart();
-    log("Gegevensfuncties actief: vier daggrafieken, CSV-export, CSV-import en historische datum");
+    log("Gegevensfuncties actief: vier daggrafieken, CSV-export en CSV-import");
   });
 })();

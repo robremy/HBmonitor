@@ -187,12 +187,12 @@
   <div id="mainCard" class="card">
     <h1>Xiaomi Smart Band 10 hartslag alarm PWA</h1>
     <div id="bpm" class="bpm">--</div>
-    <div id="contact" class="status">Nog niet verbonden</div>
+    <div id="contact" class="status">Contact: niet gedetecteerd</div>
     <div id="deviceName" class="status"></div>
     <div id="lastDeviceInfo" class="status"></div>
-    <div id="wakeLockInfo" class="status"></div>
+    <div id="wakeLockInfo" class="status">Screen wakelock: niet actief</div>
     <div id="pwaInfo" class="status">PWA: initialiseren...</div>
-    <div id="softwareVersionInfo" class="status">Softwareversie: 2026.07.18-v3</div>
+    <div id="softwareVersionInfo" class="status">Softwareversie: 2026.07.18-v4</div>
     <div id="updateInfo" class="update-line" role="status" aria-live="polite">
       <strong>Nieuwe softwareversie beschikbaar.</strong><br>
       Werk bij wanneer de hartslagmeting veilig onderbroken kan worden.<br>
@@ -200,7 +200,7 @@
         Nu bijwerken
       </button>
     </div>
-    <div id="dbInfo" class="status">Metingen: initialiseren...</div>
+    <div id="dbInfo" class="status">Opgeslagen: -- bpm</div>
     <div id="storageInfo" class="status">Opslag: controleren...</div>
   </div>
 
@@ -219,17 +219,18 @@
     </label>
 
     <label>
-      Alarm na aantal seconden boven grens:
+      Minimale duur grensoverschrijding:
       <input id="secondsHigh" type="number" value="10" min="1" max="300">
+      sec
     </label>
 
     <label>
       Cooldown tussen alarmen:
       <input id="cooldown" type="number" value="30" min="5" max="600">
-      seconden
+      sec
     </label>
 
-    <div id="alarmStatus" class="status">Alarmstatus: wacht op hartslag</div>
+    <div id="alarmStatus" class="status ok">Alarmstatus &lt; 76 bpm</div>
   </div>
 
   <div class="card">
@@ -260,7 +261,7 @@
 <script>
 "use strict";
 
-const SOFTWARE_VERSION = "2026.07.18-v3";
+const SOFTWARE_VERSION = "2026.07.18-v4";
 
 const HR_SERVICE = "0000180d-0000-1000-8000-00805f9b34fb";
 const HR_MEASUREMENT = "00002a37-0000-1000-8000-00805f9b34fb";
@@ -333,7 +334,7 @@ function setStatus(message, className = "") {
 
 function setDbInfo(message, className = "") {
   const element = document.getElementById("dbInfo");
-  element.textContent = "Metingen: " + message;
+  element.textContent = message;
   element.className = "status " + className;
 }
 
@@ -633,7 +634,7 @@ function openIndexedDb() {
         alert("Nieuwe databaseversie beschikbaar. Sluit en open de app opnieuw.");
       };
 
-      setDbInfo("klaar", "ok");
+      setDbInfo("Opgeslagen: -- bpm", "ok");
       resolve(db);
     };
 
@@ -985,13 +986,13 @@ async function requestScreenWakeLock() {
 
   try {
     if (!("wakeLock" in navigator)) {
-      element.textContent = "Browser screen WakeLock niet ondersteund";
+      element.textContent = "Screen wakelock: niet ondersteund";
       log("Browser screen WakeLock niet ondersteund");
       return;
     }
 
     if (screenWakeLock !== null) {
-      element.textContent = "Browser screen WakeLock actief";
+      element.textContent = "Screen wakelock: actief";
       return;
     }
 
@@ -1000,14 +1001,14 @@ async function requestScreenWakeLock() {
     screenWakeLock.addEventListener("release", () => {
       screenWakeLock = null;
       document.getElementById("wakeLockInfo").textContent =
-        "Browser screen WakeLock vrijgegeven";
+        "Screen wakelock: niet actief";
       log("Browser screen WakeLock vrijgegeven");
     });
 
-    element.textContent = "Browser screen WakeLock actief";
+    element.textContent = "Screen wakelock: actief";
     log("Browser screen WakeLock actief");
   } catch (error) {
-    element.textContent = "Browser screen WakeLock niet actief";
+    element.textContent = "Screen wakelock: niet actief";
     log("Browser screen WakeLock fout: " + error);
   }
 }
@@ -1369,7 +1370,9 @@ async function onHeartRate(event) {
   document.getElementById("bpm").textContent = parsed.bpm;
   const liveHeartRate = document.getElementById("liveHeartRate");
   if (liveHeartRate) liveHeartRate.textContent = "Hartslag: " + parsed.bpm + " bpm";
-  document.getElementById("contact").textContent = parsed.contact;
+  document.getElementById("contact").textContent = parsed.contact.includes("gedetecteerd")
+    ? "Contact: gedetecteerd"
+    : "Contact: niet gedetecteerd";
 
   const now = new Date();
   const limit = getLimit();
@@ -1410,7 +1413,7 @@ async function onHeartRate(event) {
   saveSampleIndexedDb(sample)
     .then(() => {
       saveCounter += 1;
-      setDbInfo("opgeslagen: " + parsed.bpm + " bpm", "ok");
+      setDbInfo("Opgeslagen: " + parsed.bpm + " bpm", "ok");
 
       if (saveCounter % 20 === 0) {
         log("IndexedDB opslag OK: " + saveCounter + " metingen sinds start");
@@ -1442,8 +1445,7 @@ function checkAlarm(bpm) {
 
     const highFor = Math.round((now - aboveSince) / 1000);
     setStatus(
-      "Alarmstatus: hartslag boven alarmgrens (" + limit +
-      " bpm) gedurende " + highFor + " sec",
+      "Alarmstatus > " + limit + " bpm (" + highFor + " sec)",
       "bad"
     );
 
@@ -1457,7 +1459,7 @@ function checkAlarm(bpm) {
   } else {
     aboveSince = null;
     setStatus(
-      "Alarmstatus: hartslag onder alarmgrens (" + limit + " bpm)",
+      "Alarmstatus < " + limit + " bpm",
       "ok"
     );
     document.getElementById("mainCard").className = "card";
