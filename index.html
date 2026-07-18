@@ -267,6 +267,37 @@
       gap: 8px;
     }
 
+    .annotation-options-list {
+      display: grid;
+      gap: 8px;
+      margin: 12px 0;
+      max-height: 55vh;
+      overflow-y: auto;
+    }
+
+    .annotation-option-row {
+      display: grid;
+      grid-template-columns: 54px 1fr auto;
+      gap: 8px;
+      align-items: center;
+    }
+
+    .annotation-option-row input {
+      width: 100%;
+      box-sizing: border-box;
+      padding: 8px;
+      border-radius: 8px;
+      border: 1px solid #666;
+      background: #151515;
+      color: #fff;
+      font-size: 16px;
+    }
+
+    .annotation-option-row .annotation-icon-input {
+      text-align: center;
+      font-size: 22px;
+    }
+
     .small {
       font-size: 13px;
       color: #aaa;
@@ -287,7 +318,7 @@
     <div id="deviceName" class="status"></div>
     <div id="lastDeviceInfo" class="status"></div>
     <div id="wakeLockInfo" class="status">Screen wakelock: niet actief</div>
-    <div id="softwareVersionInfo" class="status">Softwareversie: 2026.07.18-v14</div>
+    <div id="softwareVersionInfo" class="status">Softwareversie: 2026.07.18-v15</div>
     <div id="updateInfo" class="update-line" role="status" aria-live="polite">
       <strong>Nieuwe softwareversie beschikbaar.</strong><br>
       Werk bij wanneer de hartslagmeting veilig onderbroken kan worden.<br>
@@ -307,6 +338,7 @@
     <button class="red" onclick="testAlarm()">Test alarm</button>
     <button class="gray" onclick="stopVibration()">Stop alarm</button>
     <button id="installBtn" class="purple" onclick="installPwa()" style="display:none;">Installeer app</button>
+    <button class="purple" type="button" onclick="openAnnotationOptionsDialog()">Annotatie opties</button>
 
     <label>
       Alarmgrens:
@@ -366,15 +398,6 @@
       <div id="annotationPointInfo" class="status"></div>
       <select id="annotationSelect" aria-label="Extra informatie">
         <option value="">Geen extra info</option>
-        <option value="Rust">Rust</option>
-        <option value="Lopen">Lopen</option>
-        <option value="Staan">Staan</option>
-        <option value="Eten">Eten</option>
-        <option value="Douchen">Douchen</option>
-        <option value="Stress">Stress</option>
-        <option value="Klachten">Klachten</option>
-        <option value="Medicatie">Medicatie</option>
-        <option value="Overig">Overig</option>
       </select>
       <div class="annotation-actions">
         <button class="gray" value="cancel" type="submit">Annuleren</button>
@@ -383,10 +406,24 @@
     </form>
   </dialog>
 
+  <dialog id="annotationOptionsDialog" class="annotation-dialog">
+    <form method="dialog">
+      <h2>Annotatie opties</h2>
+      <div class="status">Wijzig het icoon en de tekst, voeg opties toe of verwijder ze.</div>
+      <div id="annotationOptionsList" class="annotation-options-list"></div>
+      <button id="addAnnotationOptionButton" class="gray" type="button">+ Optie toevoegen</button>
+      <div class="annotation-actions">
+        <button class="gray" value="cancel" type="submit">Annuleren</button>
+        <button id="resetAnnotationOptionsButton" class="orange" type="button">Standaard</button>
+        <button id="saveAnnotationOptionsButton" type="button">Opslaan</button>
+      </div>
+    </form>
+  </dialog>
+
 <script>
 "use strict";
 
-const SOFTWARE_VERSION = "2026.07.18-v14";
+const SOFTWARE_VERSION = "2026.07.18-v15";
 
 const HR_SERVICE = "0000180d-0000-1000-8000-00805f9b34fb";
 const HR_MEASUREMENT = "00002a37-0000-1000-8000-00805f9b34fb";
@@ -396,6 +433,76 @@ const STORAGE_LAST_ID = "xiaomi_band10_last_device_id_pwa_v1";
 const DB_NAME = "xiaomi_band10_heart_rate_db";
 const DB_VERSION = 1;
 const STORE_NAME = "samples";
+const ANNOTATION_OPTIONS_STORAGE_KEY = "heart_rate_alert_annotation_options_v1";
+const DEFAULT_ANNOTATION_OPTIONS = [
+  { icon: "🛋", label: "Rust" },
+  { icon: "🚶", label: "Lopen" },
+  { icon: "🧍", label: "Staan" },
+  { icon: "🍽", label: "Eten" },
+  { icon: "🚿", label: "Douchen" },
+  { icon: "⚡", label: "Stress" },
+  { icon: "⚠", label: "Klachten" },
+  { icon: "💊", label: "Medicatie" },
+  { icon: "📝", label: "Overig" }
+];
+let annotationOptions = loadAnnotationOptions();
+
+function normalizeAnnotationOptions(options) {
+  const seen = new Set();
+  return (Array.isArray(options) ? options : [])
+    .map(option => ({
+      icon: String(option?.icon || "📝").trim().slice(0, 8) || "📝",
+      label: String(option?.label || "").trim().slice(0, 40)
+    }))
+    .filter(option => option.label && !seen.has(option.label.toLowerCase()) && seen.add(option.label.toLowerCase()));
+}
+
+function loadAnnotationOptions() {
+  try {
+    const saved = JSON.parse(localStorage.getItem(ANNOTATION_OPTIONS_STORAGE_KEY) || "null");
+    const normalized = normalizeAnnotationOptions(saved);
+    return normalized.length ? normalized : DEFAULT_ANNOTATION_OPTIONS.map(option => ({...option}));
+  } catch (_) {
+    return DEFAULT_ANNOTATION_OPTIONS.map(option => ({...option}));
+  }
+}
+
+function saveAnnotationOptions() {
+  localStorage.setItem(ANNOTATION_OPTIONS_STORAGE_KEY, JSON.stringify(annotationOptions));
+}
+
+function getAnnotationIcon(label) {
+  return annotationOptions.find(option => option.label === label)?.icon || "📝";
+}
+
+function refreshAnnotationSelect(selectedValue = "") {
+  const select = document.getElementById("annotationSelect");
+  if (!select) return;
+  const current = selectedValue || select.value || "";
+  select.replaceChildren();
+  const none = document.createElement("option");
+  none.value = "";
+  none.textContent = "Geen extra info";
+  select.appendChild(none);
+  for (const option of annotationOptions) {
+    const element = document.createElement("option");
+    element.value = option.label;
+    element.textContent = `${option.icon} ${option.label}`;
+    select.appendChild(element);
+  }
+  if (current && !annotationOptions.some(option => option.label === current)) {
+    const legacy = document.createElement("option");
+    legacy.value = current;
+    legacy.textContent = `📝 ${current}`;
+    select.appendChild(legacy);
+  }
+  select.value = current;
+}
+
+function redrawAllHeartRateCharts() {
+  drawChart();
+  if (typeof drawRecentDayCharts === "function") drawRecentDayCharts();
+}
 
 let db = null;
 let device = null;
@@ -598,7 +705,7 @@ async function registerServiceWorker() {
   }
 
   try {
-    const registration = await navigator.serviceWorker.register("./sw.js?v=2026.07.18-v14", {
+    const registration = await navigator.serviceWorker.register("./sw.js?v=2026.07.18-v15", {
       scope: "./",
       updateViaCache: "none"
     });
@@ -1889,17 +1996,6 @@ function drawHeartRateCanvas(canvas, infoElement, sourceSamples, dateKey, isToda
   context.restore();
 
   // Annotaties blijven altijd zichtbaar in een smalle strook boven de grafiek.
-  const annotationIcons = {
-    "Rust": "🛋",
-    "Lopen": "🚶",
-    "Staan": "🧍",
-    "Eten": "🍽",
-    "Douchen": "🚿",
-    "Stress": "⚡",
-    "Klachten": "⚠",
-    "Medicatie": "💊",
-    "Overig": "📝"
-  };
   const annotatedSamples = sourceSamples
     .filter(sample => sample.annotation && sample.time >= visibleStart && sample.time <= visibleEnd)
     .sort((a, b) => a.time - b.time);
@@ -1950,7 +2046,7 @@ function drawHeartRateCanvas(canvas, infoElement, sourceSamples, dateKey, isToda
       context.fillStyle = "#111111";
       const markerText = cluster.samples.length > 1
         ? String(cluster.samples.length)
-        : (annotationIcons[representative.annotation] || "•");
+        : getAnnotationIcon(representative.annotation);
       context.fillText(markerText, markerX, markerY + 0.5 * ratio);
 
       // Bij voldoende zoom wordt de korte annotatietekst ook zichtbaar.
@@ -2066,6 +2162,78 @@ function drawHeartRateCanvas(canvas, infoElement, sourceSamples, dateKey, isToda
   }
 }
 
+function createAnnotationOptionRow(option = { icon: "📝", label: "" }) {
+  const row = document.createElement("div");
+  row.className = "annotation-option-row";
+
+  const iconInput = document.createElement("input");
+  iconInput.className = "annotation-icon-input";
+  iconInput.type = "text";
+  iconInput.value = option.icon || "📝";
+  iconInput.maxLength = 8;
+  iconInput.setAttribute("aria-label", "Icoon");
+
+  const labelInput = document.createElement("input");
+  labelInput.type = "text";
+  labelInput.value = option.label || "";
+  labelInput.maxLength = 40;
+  labelInput.placeholder = "Eigen tekst";
+  labelInput.setAttribute("aria-label", "Annotatietekst");
+
+  const removeButton = document.createElement("button");
+  removeButton.type = "button";
+  removeButton.className = "red";
+  removeButton.textContent = "×";
+  removeButton.setAttribute("aria-label", "Optie verwijderen");
+  removeButton.addEventListener("click", () => row.remove());
+
+  row.append(iconInput, labelInput, removeButton);
+  return row;
+}
+
+function renderAnnotationOptionsEditor(options = annotationOptions) {
+  const list = document.getElementById("annotationOptionsList");
+  if (!list) return;
+  list.replaceChildren(...options.map(createAnnotationOptionRow));
+}
+
+function openAnnotationOptionsDialog() {
+  const dialog = document.getElementById("annotationOptionsDialog");
+  if (!dialog) return;
+  renderAnnotationOptionsEditor();
+  if (!dialog.open) dialog.showModal();
+}
+
+function collectAnnotationOptionsFromEditor() {
+  const rows = document.querySelectorAll("#annotationOptionsList .annotation-option-row");
+  return normalizeAnnotationOptions([...rows].map(row => ({
+    icon: row.querySelector(".annotation-icon-input")?.value || "📝",
+    label: row.querySelector('input[aria-label="Annotatietekst"]')?.value || ""
+  })));
+}
+
+function commitAnnotationOptions() {
+  const updated = collectAnnotationOptionsFromEditor();
+  if (!updated.length) {
+    alert("Voeg minimaal één annotatieoptie toe.");
+    return;
+  }
+  annotationOptions = updated;
+  saveAnnotationOptions();
+  refreshAnnotationSelect();
+  redrawAllHeartRateCharts();
+  const dialog = document.getElementById("annotationOptionsDialog");
+  if (dialog?.open) dialog.close();
+}
+
+document.getElementById("addAnnotationOptionButton")?.addEventListener("click", () => {
+  document.getElementById("annotationOptionsList")?.appendChild(createAnnotationOptionRow());
+});
+document.getElementById("resetAnnotationOptionsButton")?.addEventListener("click", () => {
+  renderAnnotationOptionsEditor(DEFAULT_ANNOTATION_OPTIONS.map(option => ({...option})));
+});
+document.getElementById("saveAnnotationOptionsButton")?.addEventListener("click", commitAnnotationOptions);
+
 let pendingAnnotationSample = null;
 let pendingAnnotationRedraw = null;
 
@@ -2112,7 +2280,7 @@ function openAnnotationDialog(sample, redraw) {
   if (!dialog || !select || !info) return;
   pendingAnnotationSample = sample;
   pendingAnnotationRedraw = redraw;
-  select.value = sample.annotation || "";
+  refreshAnnotationSelect(sample.annotation || "");
   info.textContent = `${new Date(sample.time).toLocaleTimeString([], {hour:"2-digit", minute:"2-digit", second:"2-digit"})} · ${sample.bpm} bpm`;
   if (!dialog.open) dialog.showModal();
 }
@@ -2332,6 +2500,7 @@ setInterval(updateStorageEstimate, 60000);
 setTimeout(drawChart, 500);
 
 window.addEventListener("load", async () => {
+  refreshAnnotationSelect();
   document.getElementById("softwareVersionInfo").textContent =
     "Softwareversie: " + SOFTWARE_VERSION;
 
@@ -2361,6 +2530,6 @@ window.addEventListener("load", async () => {
   }, 1000);
 });
 </script>
-  <script src="./features.js?v=2026.07.18-v14"></script>
+  <script src="./features.js?v=2026.07.18-v15"></script>
 </body>
 </html>
