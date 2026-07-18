@@ -31,11 +31,11 @@ Settings → Share HR → On
 Alle hartslagmetingen blijven lokaal in Chrome IndexedDB op het apparaat.
 Gebruik "Download CSV vandaag" om data te exporteren.
 
-## Versie 2026.07.18-v8
+## Versie 2026.07.18-v9
 
 - Pinch-zoom rond het aangeraakte tijdstip.
 - Horizontaal schuiven met één vinger wanneer ingezoomd.
-- Maximale zoom: 128×.
+- Maximale zoom: 1024×.
 - Lang indrukken en bewegen toont tijd, hartslag en grensstatus zoals een Grafana-tooltip.
 
 - Vier hartslaggrafieken onder elkaar: vandaag en de drie voorgaande dagen.
