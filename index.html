@@ -318,7 +318,7 @@
     <div id="deviceName" class="status"></div>
     <div id="lastDeviceInfo" class="status"></div>
     <div id="wakeLockInfo" class="status">Screen wakelock: niet actief</div>
-    <div id="softwareVersionInfo" class="status">Softwareversie: 2026.07.18-v18</div>
+    <div id="softwareVersionInfo" class="status">Softwareversie: 2026.07.19-v19</div>
     <div id="updateInfo" class="update-line" role="status" aria-live="polite">
       <strong>Nieuwe softwareversie beschikbaar.</strong><br>
       Werk bij wanneer de hartslagmeting veilig onderbroken kan worden.<br>
@@ -422,7 +422,7 @@
 <script>
 "use strict";
 
-const SOFTWARE_VERSION = "2026.07.18-v18";
+const SOFTWARE_VERSION = "2026.07.19-v19";
 
 const HR_SERVICE = "0000180d-0000-1000-8000-00805f9b34fb";
 const HR_MEASUREMENT = "00002a37-0000-1000-8000-00805f9b34fb";
@@ -715,7 +715,7 @@ async function registerServiceWorker() {
   }
 
   try {
-    const registration = await navigator.serviceWorker.register("./sw.js?v=2026.07.18-v18", {
+    const registration = await navigator.serviceWorker.register("./sw.js?v=2026.07.19-v19", {
       scope: "./",
       updateViaCache: "none"
     });
@@ -2011,6 +2011,8 @@ function drawHeartRateCanvas(canvas, infoElement, sourceSamples, dateKey, isToda
     .filter(sample => sample.annotation && sample.time >= visibleStart && sample.time <= visibleEnd)
     .sort((a, b) => a.time - b.time);
 
+  const annotationHitTargets = [];
+
   if (annotatedSamples.length) {
     const markerY = padTop - 15 * ratio;
     const minimumMarkerDistance = 26 * ratio;
@@ -2037,6 +2039,12 @@ function drawHeartRateCanvas(canvas, infoElement, sourceSamples, dateKey, isToda
       const representative = cluster.samples[0];
       const markerX = cluster.x;
       const pointY = yFor(representative.bpm);
+      annotationHitTargets.push({
+        x: markerX,
+        y: markerY,
+        radius: 18 * ratio,
+        samples: cluster.samples
+      });
 
       context.strokeStyle = "rgba(255, 193, 7, 0.42)";
       context.lineWidth = 1 * ratio;
@@ -2093,6 +2101,7 @@ function drawHeartRateCanvas(canvas, infoElement, sourceSamples, dateKey, isToda
     fullEnd,
     ratio,
     samples: allSamples,
+    annotationHitTargets,
     minBpm,
     maxBpm
   };
@@ -2284,6 +2293,91 @@ function saveAnnotationIndexedDb(sampleId, annotation) {
   });
 }
 
+function moveAnnotationIndexedDb(sourceId, targetId, annotation) {
+  return new Promise((resolve, reject) => {
+    if (!db) {
+      reject(new Error("IndexedDB is nog niet open"));
+      return;
+    }
+    if (sourceId === targetId) {
+      resolve(false);
+      return;
+    }
+
+    const transaction = db.transaction(STORE_NAME, "readwrite");
+    const store = transaction.objectStore(STORE_NAME);
+    let sourceRecord = null;
+    let targetRecord = null;
+
+    const sourceRequest = store.get(sourceId);
+    sourceRequest.onsuccess = () => {
+      sourceRecord = sourceRequest.result;
+      if (!sourceRecord) {
+        transaction.abort();
+        reject(new Error("Bronmeting niet gevonden"));
+        return;
+      }
+      const targetRequest = store.get(targetId);
+      targetRequest.onsuccess = () => {
+        targetRecord = targetRequest.result;
+        if (!targetRecord) {
+          transaction.abort();
+          reject(new Error("Doelmeting niet gevonden"));
+          return;
+        }
+        if (targetRecord.annotation) {
+          transaction.abort();
+          reject(new Error("Op dit tijdstip staat al een annotatie"));
+          return;
+        }
+        sourceRecord.annotation = "";
+        targetRecord.annotation = annotation;
+        store.put(sourceRecord);
+        store.put(targetRecord);
+      };
+      targetRequest.onerror = event => reject(event.target.error);
+    };
+    sourceRequest.onerror = event => reject(event.target.error);
+    transaction.oncomplete = () => resolve(true);
+    transaction.onerror = event => reject(event.target.error || transaction.error);
+    transaction.onabort = event => {
+      if (!event.target.error) return;
+      reject(event.target.error);
+    };
+  });
+}
+
+function updateMovedAnnotationInMemory(sourceId, targetId, annotation) {
+  const update = samples => {
+    if (!samples) return;
+    for (const sample of samples) {
+      if (sample.id === sourceId) sample.annotation = "";
+      if (sample.id === targetId) sample.annotation = annotation;
+    }
+  };
+
+  update(todaySamples);
+  if (typeof historicalSamples !== "undefined") update(historicalSamples);
+  if (typeof recentDaySamples !== "undefined" && recentDaySamples instanceof Map) {
+    for (const samples of recentDaySamples.values()) update(samples);
+  }
+}
+
+async function moveAnnotationToSample(sourceSample, targetSample, redraw) {
+  if (!sourceSample?.id || !targetSample?.id || sourceSample.id === targetSample.id) return;
+  const annotation = sourceSample.annotation || "";
+  if (!annotation) return;
+  try {
+    await moveAnnotationIndexedDb(sourceSample.id, targetSample.id, annotation);
+    updateMovedAnnotationInMemory(sourceSample.id, targetSample.id, annotation);
+    setDbInfo(`Annotatie verplaatst naar ${new Date(targetSample.time).toLocaleTimeString([], {hour:"2-digit", minute:"2-digit", second:"2-digit"})}`, "ok");
+    redraw();
+  } catch (error) {
+    setDbInfo("Annotatie verplaatsen fout", "bad");
+    log("Annotatie verplaatsen FOUT: " + error);
+  }
+}
+
 function updateAnnotationInMemory(sampleId, annotation) {
   const update = samples => {
     if (!samples) return;
@@ -2377,6 +2471,9 @@ function bindChartInteraction(canvas, redraw) {
   let touchStartY = 0;
   let inspectTimer = null;
   let inspecting = false;
+  let annotationDragging = false;
+  let draggedAnnotationSample = null;
+  let annotationDropSample = null;
 
   const distance = touches => Math.hypot(
     touches[0].clientX - touches[1].clientX,
@@ -2386,6 +2483,55 @@ function bindChartInteraction(canvas, redraw) {
   const clearInspectTimer = () => {
     if (inspectTimer) clearTimeout(inspectTimer);
     inspectTimer = null;
+  };
+
+  const canvasPoint = (clientX, clientY) => {
+    const geometry = canvas.__heartRateChartGeometry;
+    if (!geometry) return null;
+    const rectangle = canvas.getBoundingClientRect();
+    const ratio = geometry.ratio || 1;
+    return {
+      x: (clientX - rectangle.left) * ratio,
+      y: (clientY - rectangle.top) * ratio
+    };
+  };
+
+  const annotationAtClientPoint = (clientX, clientY) => {
+    const geometry = canvas.__heartRateChartGeometry;
+    const point = canvasPoint(clientX, clientY);
+    if (!geometry || !point) return null;
+    let best = null;
+    let bestDistance = Infinity;
+    for (const target of geometry.annotationHitTargets || []) {
+      const hitDistance = Math.hypot(point.x - target.x, point.y - target.y);
+      if (hitDistance <= target.radius && hitDistance < bestDistance) {
+        const estimatedTime = geometry.visibleStart +
+          Math.min(1, Math.max(0, (point.x - geometry.padLeft) / geometry.chartWidth)) * geometry.visibleSpan;
+        best = target.samples.reduce((nearest, sample) =>
+          !nearest || Math.abs(sample.time - estimatedTime) < Math.abs(nearest.time - estimatedTime) ? sample : nearest,
+          null
+        );
+        bestDistance = hitDistance;
+      }
+    }
+    return best;
+  };
+
+  const nearestDropSampleFromClientX = (clientX, sourceSample) => {
+    const geometry = canvas.__heartRateChartGeometry;
+    if (!geometry) return null;
+    const rectangle = canvas.getBoundingClientRect();
+    const ratio = geometry.ratio || 1;
+    const deviceX = (clientX - rectangle.left) * ratio;
+    const position = Math.min(1, Math.max(0, (deviceX - geometry.padLeft) / geometry.chartWidth));
+    const targetTime = geometry.visibleStart + position * geometry.visibleSpan;
+    const candidates = (geometry.samples || []).filter(sample =>
+      sample.id === sourceSample.id || !sample.annotation
+    );
+    return candidates.reduce((nearest, sample) =>
+      !nearest || Math.abs(sample.time - targetTime) < Math.abs(nearest.time - targetTime) ? sample : nearest,
+      null
+    );
   };
 
   const setInspectionFromClientX = clientX => {
@@ -2408,6 +2554,9 @@ function bindChartInteraction(canvas, redraw) {
       event.preventDefault();
       clearInspectTimer();
       inspecting = false;
+      annotationDragging = false;
+      draggedAnnotationSample = null;
+      annotationDropSample = null;
       state.inspectTime = null;
       pinchDistance = distance(event.touches);
       startZoom = state.zoom;
@@ -2423,13 +2572,24 @@ function bindChartInteraction(canvas, redraw) {
       panStartX = touch.clientX;
       panStartCenter = state.center;
       inspecting = false;
+      annotationDragging = false;
+      draggedAnnotationSample = annotationAtClientPoint(touch.clientX, touch.clientY);
+      annotationDropSample = null;
       clearInspectTimer();
       inspectTimer = setTimeout(() => {
-        inspecting = true;
         panStartX = null;
-        setInspectionFromClientX(touchStartX);
-        if (navigator.vibrate) navigator.vibrate(15);
-      }, 350);
+        if (draggedAnnotationSample) {
+          annotationDragging = true;
+          annotationDropSample = draggedAnnotationSample;
+          state.inspectTime = draggedAnnotationSample.time;
+          redraw();
+          if (navigator.vibrate) navigator.vibrate([20, 30, 20]);
+        } else {
+          inspecting = true;
+          setInspectionFromClientX(touchStartX);
+          if (navigator.vibrate) navigator.vibrate(15);
+        }
+      }, 450);
     }
   }, { passive: false });
 
@@ -2454,6 +2614,15 @@ function bindChartInteraction(canvas, redraw) {
     const touch = event.touches[0];
     const moved = Math.hypot(touch.clientX - touchStartX, touch.clientY - touchStartY);
 
+    if (annotationDragging && draggedAnnotationSample) {
+      event.preventDefault();
+      annotationDropSample = nearestDropSampleFromClientX(touch.clientX, draggedAnnotationSample);
+      const state = getChartState(canvas);
+      state.inspectTime = annotationDropSample?.time ?? draggedAnnotationSample.time;
+      redraw();
+      return;
+    }
+
     if (inspecting) {
       event.preventDefault();
       setInspectionFromClientX(touch.clientX);
@@ -2472,14 +2641,32 @@ function bindChartInteraction(canvas, redraw) {
     }
   }, { passive: false });
 
-  canvas.addEventListener("touchend", event => {
+  canvas.addEventListener("touchend", async event => {
     clearInspectTimer();
     if (event.touches.length < 2) pinchDistance = 0;
     if (event.touches.length === 0) {
       panStartX = null;
+      const state = getChartState(canvas);
+
+      if (annotationDragging && draggedAnnotationSample) {
+        const sourceSample = draggedAnnotationSample;
+        const targetSample = annotationDropSample;
+        annotationDragging = false;
+        draggedAnnotationSample = null;
+        annotationDropSample = null;
+        state.inspectTime = null;
+        state.inspectSample = null;
+        redraw();
+        if (targetSample && targetSample.id !== sourceSample.id) {
+          await moveAnnotationToSample(sourceSample, targetSample, redraw);
+        }
+        return;
+      }
+
+      draggedAnnotationSample = null;
+      annotationDropSample = null;
       if (inspecting) {
         inspecting = false;
-        const state = getChartState(canvas);
         const inspectedSample = state.inspectSample || null;
         if (inspectedSample) openAnnotationDialog(inspectedSample, redraw);
         setTimeout(() => {
@@ -2496,7 +2683,12 @@ function bindChartInteraction(canvas, redraw) {
     pinchDistance = 0;
     panStartX = null;
     inspecting = false;
-    getChartState(canvas).inspectTime = null;
+    annotationDragging = false;
+    draggedAnnotationSample = null;
+    annotationDropSample = null;
+    const state = getChartState(canvas);
+    state.inspectTime = null;
+    state.inspectSample = null;
     redraw();
   });
 
@@ -2580,6 +2772,6 @@ window.addEventListener("load", async () => {
   }, 1000);
 });
 </script>
-  <script src="./features.js?v=2026.07.18-v18"></script>
+  <script src="./features.js?v=2026.07.19-v19"></script>
 </body>
 </html>

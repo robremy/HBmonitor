@@ -31,7 +31,7 @@ Settings → Share HR → On
 Alle hartslagmetingen blijven lokaal in Chrome IndexedDB op het apparaat.
 Gebruik "Download CSV vandaag" om data te exporteren.
 
-## Versie 2026.07.18-v18
+## Versie 2026.07.19-v19
 
 - De losse knop **Annotatie opties** is verwijderd. Beheer van iconen en eigen teksten staat nu als **⚙️ Opties wijzigen…** onderaan de annotatielijst bij een grafiek.
 
