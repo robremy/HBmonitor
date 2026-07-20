@@ -318,7 +318,7 @@
     <div id="deviceName" class="status"></div>
     <div id="lastDeviceInfo" class="status"></div>
     <div id="wakeLockInfo" class="status">Screen wakelock: niet actief</div>
-    <div id="softwareVersionInfo" class="status">Softwareversie: 2026.07.19-v19</div>
+    <div id="softwareVersionInfo" class="status">Softwareversie: 2026.07.20-v20</div>
     <div id="updateInfo" class="update-line" role="status" aria-live="polite">
       <strong>Nieuwe softwareversie beschikbaar.</strong><br>
       Werk bij wanneer de hartslagmeting veilig onderbroken kan worden.<br>
@@ -385,7 +385,7 @@
     <canvas id="hrChart" class="hr-interactive"></canvas>
     <div class="legend">
       <span class="blue-dot">●</span> blauw = normaal /
-      <span class="red-dot">●</span> rood = boven alarmwaarde
+      <span class="red-dot">●</span> rood = boven alarmgrens
       <br>
       <span id="chartInfo">Nog geen metingen.</span>
     </div>
@@ -422,7 +422,7 @@
 <script>
 "use strict";
 
-const SOFTWARE_VERSION = "2026.07.19-v19";
+const SOFTWARE_VERSION = "2026.07.20-v20";
 
 const HR_SERVICE = "0000180d-0000-1000-8000-00805f9b34fb";
 const HR_MEASUREMENT = "00002a37-0000-1000-8000-00805f9b34fb";
@@ -715,7 +715,7 @@ async function registerServiceWorker() {
   }
 
   try {
-    const registration = await navigator.serviceWorker.register("./sw.js?v=2026.07.19-v19", {
+    const registration = await navigator.serviceWorker.register("./sw.js?v=2026.07.20-v20", {
       scope: "./",
       updateViaCache: "none"
     });
@@ -2364,17 +2364,21 @@ function updateMovedAnnotationInMemory(sourceId, targetId, annotation) {
 }
 
 async function moveAnnotationToSample(sourceSample, targetSample, redraw) {
-  if (!sourceSample?.id || !targetSample?.id || sourceSample.id === targetSample.id) return;
+  if (!sourceSample?.id || !targetSample?.id || sourceSample.id === targetSample.id) return null;
   const annotation = sourceSample.annotation || "";
-  if (!annotation) return;
+  if (!annotation) return null;
   try {
     await moveAnnotationIndexedDb(sourceSample.id, targetSample.id, annotation);
     updateMovedAnnotationInMemory(sourceSample.id, targetSample.id, annotation);
+    sourceSample.annotation = "";
+    targetSample.annotation = annotation;
     setDbInfo(`Annotatie verplaatst naar ${new Date(targetSample.time).toLocaleTimeString([], {hour:"2-digit", minute:"2-digit", second:"2-digit"})}`, "ok");
     redraw();
+    return targetSample;
   } catch (error) {
     setDbInfo("Annotatie verplaatsen fout", "bad");
     log("Annotatie verplaatsen FOUT: " + error);
+    return null;
   }
 }
 
@@ -2474,6 +2478,7 @@ function bindChartInteraction(canvas, redraw) {
   let annotationDragging = false;
   let draggedAnnotationSample = null;
   let annotationDropSample = null;
+  let touchMoved = false;
 
   const distance = touches => Math.hypot(
     touches[0].clientX - touches[1].clientX,
@@ -2557,6 +2562,7 @@ function bindChartInteraction(canvas, redraw) {
       annotationDragging = false;
       draggedAnnotationSample = null;
       annotationDropSample = null;
+      touchMoved = false;
       state.inspectTime = null;
       pinchDistance = distance(event.touches);
       startZoom = state.zoom;
@@ -2575,6 +2581,7 @@ function bindChartInteraction(canvas, redraw) {
       annotationDragging = false;
       draggedAnnotationSample = annotationAtClientPoint(touch.clientX, touch.clientY);
       annotationDropSample = null;
+      touchMoved = false;
       clearInspectTimer();
       inspectTimer = setTimeout(() => {
         panStartX = null;
@@ -2613,6 +2620,7 @@ function bindChartInteraction(canvas, redraw) {
     if (event.touches.length !== 1) return;
     const touch = event.touches[0];
     const moved = Math.hypot(touch.clientX - touchStartX, touch.clientY - touchStartY);
+    if (moved > 8) touchMoved = true;
 
     if (annotationDragging && draggedAnnotationSample) {
       event.preventDefault();
@@ -2654,17 +2662,28 @@ function bindChartInteraction(canvas, redraw) {
         annotationDragging = false;
         draggedAnnotationSample = null;
         annotationDropSample = null;
+        touchMoved = false;
         state.inspectTime = null;
         state.inspectSample = null;
         redraw();
         if (targetSample && targetSample.id !== sourceSample.id) {
-          await moveAnnotationToSample(sourceSample, targetSample, redraw);
+          const movedSample = await moveAnnotationToSample(sourceSample, targetSample, redraw);
+          if (movedSample) openAnnotationDialog(movedSample, redraw);
+        } else {
+          openAnnotationDialog(sourceSample, redraw);
         }
         return;
       }
 
+      const tappedAnnotationSample = draggedAnnotationSample;
       draggedAnnotationSample = null;
       annotationDropSample = null;
+      if (tappedAnnotationSample && !touchMoved) {
+        touchMoved = false;
+        openAnnotationDialog(tappedAnnotationSample, redraw);
+        return;
+      }
+      touchMoved = false;
       if (inspecting) {
         inspecting = false;
         const inspectedSample = state.inspectSample || null;
@@ -2686,6 +2705,7 @@ function bindChartInteraction(canvas, redraw) {
     annotationDragging = false;
     draggedAnnotationSample = null;
     annotationDropSample = null;
+    touchMoved = false;
     const state = getChartState(canvas);
     state.inspectTime = null;
     state.inspectSample = null;
@@ -2772,6 +2792,6 @@ window.addEventListener("load", async () => {
   }, 1000);
 });
 </script>
-  <script src="./features.js?v=2026.07.19-v19"></script>
+  <script src="./features.js?v=2026.07.20-v20"></script>
 </body>
 </html>
