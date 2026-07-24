@@ -1,6 +1,6 @@
 /*
  * Heart Rate Alert gegevensbeheer en historische grafieken
- * Versie: 2026.07.21-v21
+ * Versie: 2026.07.24-v22
  *
  * Functies:
  * - Export van alle opgeslagen dagen naar één CSV-bestand
@@ -11,7 +11,7 @@
 "use strict";
 
 (() => {
-  const FEATURE_VERSION = "2026.07.21-v21";
+  const FEATURE_VERSION = "2026.07.24-v22";
   const CSV_HEADERS = [
     "id",
     "ts_ms",
@@ -58,6 +58,42 @@
     return selectedDateKey === todayKey ? todaySamples : historicalSamples;
   }
 
+  function setChartSummary(info, samples, dateKey, useTodayLabel = false) {
+    if (!info) return;
+
+    if (!samples || samples.length === 0) {
+      info.textContent = useTodayLabel
+        ? "Nog geen metingen."
+        : "Geen metingen opgeslagen voor " + dateKey + ".";
+      return;
+    }
+
+    const sortedSamples = [...samples].sort((a, b) => a.time - b.time);
+    const limit = getLimit();
+    const latest = sortedSamples[sortedSamples.length - 1].bpm;
+    const highCount = sortedSamples.filter(sample => sample.bpm > limit).length;
+    const baselineBpm = computeBaseline(sortedSamples);
+    const plateaus = findPlateaus(sortedSamples);
+    const brackets = findRecoveryBrackets(sortedSamples, baselineBpm);
+
+    let recoveryText = "";
+    if (brackets.length) {
+      const avgRecoveryMin = Math.round(
+        brackets.reduce((sum, bracket) => sum + bracket.recoverySeconds, 0) / brackets.length / 60
+      );
+      recoveryText = " | pieken: " + brackets.length + " (gem. herstel " + avgRecoveryMin + " min)";
+    }
+
+    const plateauText = plateaus.length ? " | plateaus: " + plateaus.length : "";
+    info.textContent =
+      "Metingen " + (useTodayLabel ? "vandaag" : dateKey) +
+      ": " + sortedSamples.length +
+      " | laatste: " + latest + " bpm" +
+      " | boven grens: " + highCount +
+      recoveryText +
+      plateauText;
+  }
+
   function updateGraphLabels() {
     const todayKey = getDayKey(new Date());
     const historicalMode = selectedDateKey !== todayKey;
@@ -71,40 +107,7 @@
         : "Hartslaggrafiek vandaag";
     }
 
-    if (!info) {
-      return;
-    }
-
-    if (!samples || samples.length === 0) {
-      info.textContent = historicalMode
-        ? "Geen metingen opgeslagen voor " + selectedDateKey + "."
-        : "Nog geen metingen.";
-      return;
-    }
-
-    const limit = getLimit();
-    const latest = samples[samples.length - 1].bpm;
-    const highCount = samples.filter(sample => sample.bpm > limit).length;
-
-    const baselineBpm = computeBaseline(samples);
-    const plateaus = findPlateaus(samples);
-    const brackets = findRecoveryBrackets(samples, baselineBpm);
-    let recoveryText = "";
-    if (brackets.length) {
-      const avgRecoveryMin = Math.round(
-        brackets.reduce((sum, bracket) => sum + bracket.recoverySeconds, 0) / brackets.length / 60
-      );
-      recoveryText = " | pieken: " + brackets.length + " (gem. herstel " + avgRecoveryMin + " min)";
-    }
-    const plateauText = plateaus.length ? " | plateaus: " + plateaus.length : "";
-
-    info.textContent =
-      "Metingen " + (historicalMode ? selectedDateKey : "vandaag") +
-      ": " + samples.length +
-      " | laatste: " + latest + " bpm" +
-      " | boven grens: " + highCount +
-      recoveryText +
-      plateauText;
+    setChartSummary(info, samples, selectedDateKey, !historicalMode);
   }
 
   drawChart = function enhancedDrawChart() {
@@ -210,6 +213,7 @@
     if (!canvas || !info) return;
     bindChartInteraction(canvas, drawRecentDayCharts);
     drawHeartRateCanvas(canvas, info, samples, dateKey, false);
+    setChartSummary(info, samples, dateKey, false);
   }
 
   const drawRecentDayCharts = window.drawRecentDayCharts = function drawRecentDayCharts() {
