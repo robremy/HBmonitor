@@ -318,7 +318,7 @@
     <div id="deviceName" class="status"></div>
     <div id="lastDeviceInfo" class="status"></div>
     <div id="wakeLockInfo" class="status">Screen wakelock: niet actief</div>
-    <div id="softwareVersionInfo" class="status">Softwareversie: 2026.07.20-v20</div>
+    <div id="softwareVersionInfo" class="status">Softwareversie: 2026.07.21-v21</div>
     <div id="updateInfo" class="update-line" role="status" aria-live="polite">
       <strong>Nieuwe softwareversie beschikbaar.</strong><br>
       Werk bij wanneer de hartslagmeting veilig onderbroken kan worden.<br>
@@ -422,7 +422,7 @@
 <script>
 "use strict";
 
-const SOFTWARE_VERSION = "2026.07.20-v20";
+const SOFTWARE_VERSION = "2026.07.21-v21";
 
 const HR_SERVICE = "0000180d-0000-1000-8000-00805f9b34fb";
 const HR_MEASUREMENT = "00002a37-0000-1000-8000-00805f9b34fb";
@@ -715,7 +715,7 @@ async function registerServiceWorker() {
   }
 
   try {
-    const registration = await navigator.serviceWorker.register("./sw.js?v=2026.07.20-v20", {
+    const registration = await navigator.serviceWorker.register("./sw.js?v=2026.07.21-v21", {
       scope: "./",
       updateViaCache: "none"
     });
@@ -1889,6 +1889,137 @@ function formatTimeScale(stepMs) {
   return `${stepMs / 3600000} uur`;
 }
 
+// ---------------------------------------------------------------------
+// Plateau- en hersteldetectie
+// Een "plateau" is een periode waarin de hartslag gedurende minstens
+// minDurationSec binnen een smalle band (bandBpm) boven aboveBpm blijft.
+// "Herstel" is de tijd vanaf een lokale piek tot de hartslag terugzakt
+// naar de persoonlijke baseline (+ thresholdPct).
+// ---------------------------------------------------------------------
+
+function computeBaseline(samples) {
+  if (!samples || !samples.length) return 60;
+  const sorted = [...samples].map(sample => sample.bpm).sort((a, b) => a - b);
+  return sorted[Math.floor(sorted.length * 0.2)] || sorted[0];
+}
+
+function findRecoveryBrackets(samples, baselineBpm, thresholdPct = 0.1) {
+  if (!samples || samples.length < 3) return [];
+  const brackets = [];
+  const recoveredBpm = baselineBpm * (1 + thresholdPct);
+
+  for (let index = 1; index < samples.length - 1; index += 1) {
+    const previous = samples[index - 1];
+    const current = samples[index];
+    const next = samples[index + 1];
+
+    if (current.bpm > previous.bpm && current.bpm >= next.bpm && current.bpm > recoveredBpm) {
+      let cursor = index + 1;
+      while (cursor < samples.length && samples[cursor].bpm > recoveredBpm) cursor += 1;
+      if (cursor < samples.length) {
+        brackets.push({
+          peakTime: current.time,
+          peakBpm: current.bpm,
+          recoveredTime: samples[cursor].time,
+          recoverySeconds: (samples[cursor].time - current.time) / 1000
+        });
+      }
+    }
+  }
+
+  // Pieken die minder dan een minuut uit elkaar liggen samenvoegen tot de hoogste piek.
+  const merged = [];
+  for (const bracket of brackets) {
+    const last = merged[merged.length - 1];
+    if (last && bracket.peakTime - last.peakTime < 60000) {
+      if (bracket.peakBpm > last.peakBpm) merged[merged.length - 1] = bracket;
+    } else {
+      merged.push(bracket);
+    }
+  }
+  return merged;
+}
+
+function findPlateaus(samples, bandBpm = 4, minDurationSec = 90, aboveBpm = 90) {
+  if (!samples || !samples.length) return [];
+  const plateaus = [];
+  let start = null;
+  let windowSamples = [];
+
+  for (let index = 0; index < samples.length; index += 1) {
+    windowSamples.push(samples[index]);
+    windowSamples = windowSamples.filter(sample => samples[index].time - sample.time <= 30000);
+    const values = windowSamples.map(sample => sample.bpm);
+    const spread = Math.max(...values) - Math.min(...values);
+
+    if (spread <= bandBpm && samples[index].bpm > aboveBpm) {
+      if (start === null) start = windowSamples[0].time;
+    } else if (start !== null) {
+      const end = samples[index - 1] ? samples[index - 1].time : samples[index].time;
+      if ((end - start) / 1000 >= minDurationSec) plateaus.push({ start, end });
+      start = null;
+    }
+  }
+
+  if (start !== null) {
+    const end = samples[samples.length - 1].time;
+    if ((end - start) / 1000 >= minDurationSec) plateaus.push({ start, end });
+  }
+  return plateaus;
+}
+
+function drawRecoveryFeatures(context, allSamples, xFor, yFor, visibleStart, visibleEnd, ratio, padLeft, padTop, chartWidth, chartHeight) {
+  const baselineBpm = computeBaseline(allSamples);
+  const plateaus = findPlateaus(allSamples);
+  const brackets = findRecoveryBrackets(allSamples, baselineBpm);
+
+  context.save();
+  context.beginPath();
+  context.rect(padLeft, padTop, chartWidth, chartHeight);
+  context.clip();
+
+  context.fillStyle = "rgba(255, 196, 0, 0.12)";
+  plateaus.forEach(plateau => {
+    if (plateau.end < visibleStart || plateau.start > visibleEnd) return;
+    const x1 = xFor(Math.max(plateau.start, visibleStart));
+    const x2 = xFor(Math.min(plateau.end, visibleEnd));
+    context.fillRect(x1, padTop, x2 - x1, chartHeight);
+  });
+
+  const baselineY = yFor(baselineBpm);
+  context.strokeStyle = "rgba(242, 185, 90, 0.9)";
+  context.fillStyle = "#f2b95a";
+  context.lineWidth = 1.5 * ratio;
+  context.font = `${11 * ratio}px system-ui, sans-serif`;
+
+  brackets.forEach(bracket => {
+    if (bracket.peakTime < visibleStart || bracket.peakTime > visibleEnd) return;
+    const x = xFor(bracket.peakTime);
+    const peakY = yFor(bracket.peakBpm);
+
+    context.setLineDash([4 * ratio, 3 * ratio]);
+    context.beginPath();
+    context.moveTo(x, peakY);
+    context.lineTo(x, baselineY);
+    context.stroke();
+    context.setLineDash([]);
+
+    context.beginPath();
+    context.moveTo(x - 4 * ratio, peakY); context.lineTo(x + 4 * ratio, peakY);
+    context.moveTo(x - 4 * ratio, baselineY); context.lineTo(x + 4 * ratio, baselineY);
+    context.stroke();
+
+    context.beginPath();
+    context.arc(x, peakY, 2.5 * ratio, 0, Math.PI * 2);
+    context.fill();
+
+    const minutes = Math.round(bracket.recoverySeconds / 60);
+    context.fillText("↓ " + minutes + " min", x + 6 * ratio, (peakY + baselineY) / 2);
+  });
+
+  context.restore();
+}
+
 function drawHeartRateCanvas(canvas, infoElement, sourceSamples, dateKey, isTodayChart = false) {
   if (!canvas) return;
 
@@ -2005,6 +2136,8 @@ function drawHeartRateCanvas(canvas, infoElement, sourceSamples, dateKey, isToda
     context.stroke();
   }
   context.restore();
+
+  drawRecoveryFeatures(context, allSamples, xFor, yFor, visibleStart, visibleEnd, ratio, padLeft, padTop, chartWidth, chartHeight);
 
   // Annotaties blijven altijd zichtbaar in een smalle strook boven de grafiek.
   const annotatedSamples = sourceSamples
@@ -2792,6 +2925,6 @@ window.addEventListener("load", async () => {
   }, 1000);
 });
 </script>
-  <script src="./features.js?v=2026.07.20-v20"></script>
+  <script src="./features.js?v=2026.07.21-v21"></script>
 </body>
 </html>
