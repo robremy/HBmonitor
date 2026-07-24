@@ -318,7 +318,7 @@
     <div id="deviceName" class="status"></div>
     <div id="lastDeviceInfo" class="status"></div>
     <div id="wakeLockInfo" class="status">Screen wakelock: niet actief</div>
-    <div id="softwareVersionInfo" class="status">Softwareversie: 2026.07.24-v22</div>
+    <div id="softwareVersionInfo" class="status">Softwareversie: 2026.07.24-v23</div>
     <div id="updateInfo" class="update-line" role="status" aria-live="polite">
       <strong>Nieuwe softwareversie beschikbaar.</strong><br>
       Werk bij wanneer de hartslagmeting veilig onderbroken kan worden.<br>
@@ -422,7 +422,7 @@
 <script>
 "use strict";
 
-const SOFTWARE_VERSION = "2026.07.24-v22";
+const SOFTWARE_VERSION = "2026.07.24-v23";
 
 const HR_SERVICE = "0000180d-0000-1000-8000-00805f9b34fb";
 const HR_MEASUREMENT = "00002a37-0000-1000-8000-00805f9b34fb";
@@ -715,7 +715,7 @@ async function registerServiceWorker() {
   }
 
   try {
-    const registration = await navigator.serviceWorker.register("./sw.js?v=2026.07.24-v22", {
+    const registration = await navigator.serviceWorker.register("./sw.js?v=2026.07.24-v23", {
       scope: "./",
       updateViaCache: "none"
     });
@@ -1987,10 +1987,23 @@ function drawRecoveryFeatures(context, allSamples, xFor, yFor, visibleStart, vis
   });
 
   const baselineY = yFor(baselineBpm);
+
+  // Gele rustlijn: één horizontale dagbaseline, berekend uit de laagste 20%.
+  context.strokeStyle = "#ffd600";
+  context.fillStyle = "#ffe44d";
+  context.lineWidth = 2 * ratio;
+  context.setLineDash([]);
+  context.beginPath();
+  context.moveTo(padLeft, baselineY);
+  context.lineTo(padLeft + chartWidth, baselineY);
+  context.stroke();
+  context.font = `${11 * ratio}px system-ui, sans-serif`;
+  context.fillText("rust " + Math.round(baselineBpm) + " bpm", padLeft + 8 * ratio, baselineY - 6 * ratio);
+
+  // Bestaande piek-naar-rustmarkeringen behouden in een zachtere oranje tint.
   context.strokeStyle = "rgba(242, 185, 90, 0.9)";
   context.fillStyle = "#f2b95a";
   context.lineWidth = 1.5 * ratio;
-  context.font = `${11 * ratio}px system-ui, sans-serif`;
 
   brackets.forEach(bracket => {
     if (bracket.peakTime < visibleStart || bracket.peakTime > visibleEnd) return;
@@ -2925,6 +2938,6 @@ window.addEventListener("load", async () => {
   }, 1000);
 });
 </script>
-  <script src="./features.js?v=2026.07.24-v22"></script>
+  <script src="./features.js?v=2026.07.24-v23"></script>
 </body>
 </html>
