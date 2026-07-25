@@ -1903,10 +1903,37 @@ function computeBaseline(samples) {
   return sorted[Math.floor(sorted.length * 0.2)] || sorted[0];
 }
 
+const RECONNECT_GAP_MS = 180000; // >= 3 min zonder metingen = verbinding beschouwd als verbroken
+const RECONNECT_SETTLE_MS = 120000; // eerste 2 min na hervatting: sensor kan nog transiënt pieken, negeren
+
+// Vindt tijdstippen waarop de meting hervat na een gat van >= RECONNECT_GAP_MS,
+// oftewel het moment dat de band/sensor weer begon te meten na een onderbreking.
+function findReconnectTimes(samples, gapMs = RECONNECT_GAP_MS) {
+  const reconnects = [];
+  for (let index = 1; index < samples.length; index += 1) {
+    const gap = samples[index].time - samples[index - 1].time;
+    if (gap >= gapMs) {
+      reconnects.push(samples[index].time);
+    }
+  }
+  return reconnects;
+}
+
+// Geeft true terug als `time` binnen het instelbaar-transiënte venster valt dat direct
+// volgt op een reconnect (verbinding hervat na >= 3 min stilte). Zulke momenten kunnen
+// een sensor-inschakelpiek bevatten die geen echte fysiologische piek is.
+function isWithinReconnectSettleWindow(time, reconnectTimes, settleMs = RECONNECT_SETTLE_MS) {
+  for (const reconnectTime of reconnectTimes) {
+    if (time >= reconnectTime && time < reconnectTime + settleMs) return true;
+  }
+  return false;
+}
+
 function findRecoveryBrackets(samples, baselineBpm, thresholdPct = 0.1) {
   if (!samples || samples.length < 3) return [];
   const brackets = [];
   const recoveredBpm = baselineBpm * (1 + thresholdPct);
+  const reconnectTimes = findReconnectTimes(samples);
 
   for (let index = 1; index < samples.length - 1; index += 1) {
     const previous = samples[index - 1];
@@ -1914,28 +1941,22 @@ function findRecoveryBrackets(samples, baselineBpm, thresholdPct = 0.1) {
     const next = samples[index + 1];
 
     if (current.bpm > previous.bpm && current.bpm >= next.bpm && current.bpm > recoveredBpm) {
+      // Sla pieken over die vallen binnen de eerste 2 min na een reconnect
+      // (verbinding was >= 3 min verbroken): dit is vermoedelijk een sensor-
+      // inschakeleffect, geen echte hartslagpiek.
+      if (isWithinReconnectSettleWindow(current.time, reconnectTimes)) {
+        continue;
+      }
+
       let cursor = index + 1;
       while (cursor < samples.length && samples[cursor].bpm > recoveredBpm) cursor += 1;
       if (cursor < samples.length) {
-        // Negeer herstelanalyses bij datagaten >= 1 minuut gevolgd door 2 minuten transient.
-        let valid = true;
-        for (let j = index + 1; j <= cursor; j += 1) {
-          const gap = samples[j].time - samples[j - 1].time;
-          if (gap >= 60000) {
-            if (samples[cursor].time < samples[j].time + 120000) {
-              valid = false;
-            }
-            break;
-          }
-        }
-        if (valid) {
         brackets.push({
           peakTime: current.time,
           peakBpm: current.bpm,
           recoveredTime: samples[cursor].time,
           recoverySeconds: (samples[cursor].time - current.time) / 1000
         });
-        }
       }
     }
   }
