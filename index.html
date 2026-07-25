@@ -318,7 +318,7 @@
     <div id="deviceName" class="status"></div>
     <div id="lastDeviceInfo" class="status"></div>
     <div id="wakeLockInfo" class="status">Screen wakelock: niet actief</div>
-    <div id="softwareVersionInfo" class="status">Softwareversie: 2026.07.25-v24</div>
+    <div id="softwareVersionInfo" class="status">Softwareversie: 2026.07.25-v25</div>
     <div id="updateInfo" class="update-line" role="status" aria-live="polite">
       <strong>Nieuwe softwareversie beschikbaar.</strong><br>
       Werk bij wanneer de hartslagmeting veilig onderbroken kan worden.<br>
@@ -422,7 +422,7 @@
 <script>
 "use strict";
 
-const SOFTWARE_VERSION = "2026.07.25-v24";
+const SOFTWARE_VERSION = "2026.07.25-v25";
 
 const HR_SERVICE = "0000180d-0000-1000-8000-00805f9b34fb";
 const HR_MEASUREMENT = "00002a37-0000-1000-8000-00805f9b34fb";
@@ -715,7 +715,7 @@ async function registerServiceWorker() {
   }
 
   try {
-    const registration = await navigator.serviceWorker.register("./sw.js?v=2026.07.25-v24", {
+    const registration = await navigator.serviceWorker.register("./sw.js?v=2026.07.25-v25", {
       scope: "./",
       updateViaCache: "none"
     });
@@ -2951,6 +2951,6 @@ window.addEventListener("load", async () => {
   }, 1000);
 });
 </script>
-  <script src="./features.js?v=2026.07.25-v24"></script>
+  <script src="./features.js?v=2026.07.25-v25"></script>
 </body>
 </html>
