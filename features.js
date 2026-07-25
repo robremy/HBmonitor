@@ -1,6 +1,6 @@
 /*
  * Heart Rate Alert gegevensbeheer en historische grafieken
- * Versie: 2026.07.24-v24
+ * Versie: 2026.07.24-v23
  *
  * Functies:
  * - Export van alle opgeslagen dagen naar één CSV-bestand
@@ -11,7 +11,7 @@
 "use strict";
 
 (() => {
-  const FEATURE_VERSION = "2026.07.24-v24";
+  const FEATURE_VERSION = "2026.07.24-v23";
   const CSV_HEADERS = [
     "id",
     "ts_ms",
@@ -72,8 +72,9 @@
     const limit = getLimit();
     const latest = sortedSamples[sortedSamples.length - 1].bpm;
     const highCount = sortedSamples.filter(sample => sample.bpm > limit).length;
+    const baselineBpm = computeBaseline(sortedSamples);
     const plateaus = findPlateaus(sortedSamples);
-    const brackets = findRecoveryBrackets(sortedSamples);
+    const brackets = findRecoveryBrackets(sortedSamples, baselineBpm);
 
     let recoveryText = "";
     if (brackets.length) {
