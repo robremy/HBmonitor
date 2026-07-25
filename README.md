@@ -31,13 +31,12 @@ Settings → Share HR → On
 Alle hartslagmetingen blijven lokaal in Chrome IndexedDB op het apparaat.
 Gebruik "Download CSV vandaag" om data te exporteren.
 
-## Versie 2026.07.24-v23
+## Versie 2026.07.24-v24
 
-- Elke daggrafiek toont nu dezelfde samenvatting als vandaag: metingen, laatste hartslag, aantal boven de alarmgrens, pieken met gemiddelde hersteltijd en plateaus.
-
-- Plateauherkenning: perioden waarin de hartslag ≥90 sec binnen een smalle bandbreedte boven de 90 bpm blijft, worden geel gearceerd in de grafiek.
-- Herstelbrackets: bij elke piek boven de persoonlijke baseline wordt een gestippelde verticale lijn met hersteltijd ("↓ X min") getekend tot de hartslag weer bij baseline is.
-- De statusregel onder elke grafiek toont nu ook het aantal gedetecteerde pieken met gemiddelde hersteltijd en het aantal plateaus.
+- De gele rustlijn is nu een lokale, dynamische lijn op basis van de laagste 20% van de metingen in de voorafgaande vijf minuten.
+- Elke piek gebruikt de lokale rustwaarde van vlak vóór die piek.
+- Herstel is bereikt wanneer 80% van de stijging boven de lokale rustwaarde is verdwenen.
+- Elke daggrafiek toont dezelfde samenvatting: metingen, laatste hartslag, aantal boven de alarmgrens, pieken met gemiddelde hersteltijd en plateaus.
 
 ## Versie 2026.07.20-v20
 
