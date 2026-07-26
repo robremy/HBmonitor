@@ -1,11 +1,21 @@
 # Heart Rate Alert
 
-## Screenshot
+## Screenshots
 
 <p align="center">
-  <img src="hbmonitor-screenshot.jpg"
-       alt="Heart Rate Alert op een smartphone"
-       width="380">
+  <img src="screenshot-overzicht.jpg" alt="Overzicht: actuele hartslag en dagoverzicht" width="260">
+  <img src="screenshot-grafiek-zoom.jpg" alt="Ingezoomde hartslaggrafiek met piekherkenning" width="260">
+  <img src="screenshot-bediening.jpg" alt="Bediening: verbinden, alarm en grenzen" width="260">
+</p>
+<p align="center">
+  <img src="screenshot-log.jpg" alt="Log van metingen en opslagstatus" width="260">
+  <img src="screenshot-info-toevoegen.jpg" alt="Info toevoegen aan een meetpunt" width="260">
+  <img src="screenshot-annotatie-opties.jpg" alt="Annotatie-opties beheren" width="260">
+</p>
+<p align="center">
+  <img src="screenshot-gegevens.jpg" alt="Gegevens exporteren/importeren" width="260">
+  <img src="screenshot-widget.jpg" alt="Heart Rate Alert widget-info" width="260">
+  <img src="screenshot-bluetooth-koppelen.jpg" alt="Bluetooth koppelen met de Xiaomi Smart Band 10" width="260">
 </p>
 
 Heart Rate Alert functioneert offline in Chrome:
@@ -30,6 +40,10 @@ Settings → Share HR → On
 
 Alle hartslagmetingen blijven lokaal in Chrome IndexedDB op het apparaat.
 Gebruik "Download CSV vandaag" om data te exporteren.
+
+## Versie 2026.07.25-v25
+
+- README bijgewerkt met een volledige set schermafbeeldingen: overzicht, ingezoomde grafiek, bediening, log, info toevoegen, annotatie-opties, gegevens exporteren/importeren, widget-info en Bluetooth-koppeling.
 
 ## Versie 2026.07.24-v23
 
