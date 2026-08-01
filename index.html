@@ -328,6 +328,8 @@
     </div>
     <div id="dbInfo" class="status">Laatste opslag: --</div>
     <div id="storageInfo" class="status">Opslag: controleren...</div>
+    <div id="bridgeInfo" class="status">Bridge: niet gecontroleerd</div>
+    <button class="gray" type="button" onclick="syncBridgeIntoToday()">Sync met bridge</button>
   </div>
 
   <div class="card">
@@ -2606,6 +2608,7 @@ async function commitAnnotation() {
     await saveAnnotationIndexedDb(sample.id, annotation);
     sample.annotation = annotation;
     updateAnnotationInMemory(sample.id, annotation);
+    postAnnotationToBridge(sample, annotation);
     setDbInfo("Info opgeslagen", "ok");
     if (pendingAnnotationRedraw) pendingAnnotationRedraw();
     if (dialog && dialog.open) dialog.close();
@@ -2972,6 +2975,147 @@ window.addEventListener("load", async () => {
   }, 1000);
 });
 </script>
-  <script src="./features.js?v=2026.07.25-v25"></script>
+<script>
+// ============================================================
+// BRIDGE SYNC (Termux hr_sync_server.py op localhost)
+//
+// Leest metingen/annotaties uit de SQLite-database die de HR BLE Bridge-app
+// en de tailer vullen, en schrijft eigen annotaties terug naar diezelfde
+// database. Puur aanvullend: als de server niet bereikbaar is (bv. Termux
+// niet gestart, of de PWA draait op een ander toestel), blijft alles zoals
+// het was via IndexedDB.
+// ============================================================
+
+const BRIDGE_URL = "http://127.0.0.1:8787";
+let bridgeAvailable = false;
+
+function setBridgeInfo(text, status) {
+  const el = document.getElementById("bridgeInfo");
+  if (!el) return;
+  el.textContent = text;
+  el.className = "status " + (status === "ok" ? "ok" : "bad");
+}
+
+// Zelfde formaat als de Kotlin-kant (SimpleDateFormat "yyyy-MM-dd'T'HH:mm:ss"):
+// lokale wandklok-tijd, geen milliseconden, geen tijdzone-offset.
+function bridgeIsoString(ms) {
+  const d = new Date(ms);
+  return d.getFullYear() + "-" +
+    String(d.getMonth() + 1).padStart(2, "0") + "-" +
+    String(d.getDate()).padStart(2, "0") + "T" +
+    String(d.getHours()).padStart(2, "0") + ":" +
+    String(d.getMinutes()).padStart(2, "0") + ":" +
+    String(d.getSeconds()).padStart(2, "0");
+}
+
+function bridgeTsToMs(ts) {
+  const [datePart, timePart] = ts.split("T");
+  const [y, m, d] = datePart.split("-").map(Number);
+  const [hh, mm, ss] = timePart.split(":").map(Number);
+  return new Date(y, m - 1, d, hh, mm, ss || 0).getTime();
+}
+
+async function checkBridgeAvailable() {
+  try {
+    const res = await fetch(BRIDGE_URL + "/api/health", { cache: "no-store" });
+    bridgeAvailable = res.ok;
+  } catch (error) {
+    bridgeAvailable = false;
+  }
+  if (!bridgeAvailable) {
+    setBridgeInfo("Bridge: niet bereikbaar", "bad");
+  }
+  return bridgeAvailable;
+}
+
+async function fetchBridgeMetingen(dateKey) {
+  const res = await fetch(BRIDGE_URL + "/api/metingen?date=" + encodeURIComponent(dateKey), { cache: "no-store" });
+  if (!res.ok) throw new Error("HTTP " + res.status);
+  return res.json();
+}
+
+async function fetchBridgeAnnotaties(dateKey) {
+  const res = await fetch(BRIDGE_URL + "/api/annotaties?date=" + encodeURIComponent(dateKey), { cache: "no-store" });
+  if (!res.ok) throw new Error("HTTP " + res.status);
+  return res.json();
+}
+
+async function syncBridgeIntoToday() {
+  const ok = await checkBridgeAvailable();
+  if (!ok) return false;
+
+  try {
+    const dateKey = getDayKey(new Date());
+    const [metingen, annotaties] = await Promise.all([
+      fetchBridgeMetingen(dateKey),
+      fetchBridgeAnnotaties(dateKey)
+    ]);
+
+    const annotatieByTs = {};
+    annotaties.forEach(a => { annotatieByTs[a.ts] = a.label; });
+
+    const limit = getLimit();
+    const bridgeSamples = metingen.map(m => {
+      const ms = bridgeTsToMs(m.ts);
+      return {
+        id: "bridge_" + m.ts,
+        time: ms,
+        label: new Date(ms).toLocaleTimeString(),
+        bpm: m.bpm,
+        alarm_limit: limit,
+        above_limit: m.bpm > limit ? 1 : 0,
+        annotation: annotatieByTs[m.ts] || "",
+        source: "bridge",
+        bridge_ts: m.ts
+      };
+    });
+
+    // Eigen (rechtstreekse Web Bluetooth) metingen blijven staan; alleen de
+    // bridge-metingen worden bij elke sync ververst, zodat herhaald syncen
+    // geen duplicaten opstapelt. Op seconde-niveau dedupliceren voorkomt dat
+    // hetzelfde moment twee keer getekend wordt als beide bronnen actief
+    // waren.
+    const eigenSamples = todaySamples.filter(sample => sample.source !== "bridge");
+    const eigenTijden = new Set(eigenSamples.map(sample => Math.floor(sample.time / 1000)));
+    const aanvullendeBridgeSamples = bridgeSamples.filter(
+      sample => !eigenTijden.has(Math.floor(sample.time / 1000))
+    );
+
+    todaySamples = eigenSamples.concat(aanvullendeBridgeSamples).sort((a, b) => a.time - b.time);
+
+    drawChart();
+    setBridgeInfo("Bridge: " + metingen.length + " metingen gesynchroniseerd", "ok");
+    return true;
+  } catch (error) {
+    setBridgeInfo("Bridge sync fout: " + error, "bad");
+    log("Bridge sync FOUT: " + error);
+    return false;
+  }
+}
+
+async function postAnnotationToBridge(sample, annotation) {
+  if (!bridgeAvailable) return;
+  try {
+    const ts = sample.source === "bridge" ? sample.bridge_ts : bridgeIsoString(sample.time);
+    await fetch(BRIDGE_URL + "/api/annotaties", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ ts, type: "pwa", label: annotation, bpm: sample.bpm })
+    });
+  } catch (error) {
+    // Best-effort: bridge-sync is een aanvulling, geen vereiste. IndexedDB
+    // blijft de bron van waarheid als de Termux-server niet bereikbaar is.
+    log("Annotatie naar bridge sturen mislukt: " + error);
+  }
+}
+
+// Bij opstarten stil controleren of de bridge-server bereikbaar is, zonder
+// meteen data te syncen (dat blijft de "Sync met bridge"-knop, zodat het
+// niet ongevraagd de grafiek verandert).
+window.addEventListener("load", () => {
+  setTimeout(() => { checkBridgeAvailable(); }, 1500);
+});
+</script>
+<script src="./features.js?v=2026.07.25-v25"></script>
 </body>
 </html>
