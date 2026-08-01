@@ -2605,11 +2605,28 @@ async function commitAnnotation() {
   if (!sample || !select) return;
   const annotation = select.value;
   try {
-    await saveAnnotationIndexedDb(sample.id, annotation);
-    sample.annotation = annotation;
-    updateAnnotationInMemory(sample.id, annotation);
-    postAnnotationToBridge(sample, annotation);
-    setDbInfo("Info opgeslagen", "ok");
+    if (sample.source === "bridge") {
+      // Dit punt komt uit de bridge-database, niet uit IndexedDB — daar
+      // bestaat geen record met deze id om op te slaan. Schrijf de
+      // annotatie rechtstreeks (en wachten we er nu wél op, zodat een
+      // mislukte poging hier zichtbaar wordt in plaats van stil te falen).
+      if (!bridgeAvailable) {
+        throw new Error("Bridge niet bereikbaar — kan annotatie voor dit (bridge-)punt niet opslaan");
+      }
+      await postAnnotationToBridge(sample, annotation);
+      sample.annotation = annotation;
+      setDbInfo("Info opgeslagen (bridge)", "ok");
+    } else {
+      await saveAnnotationIndexedDb(sample.id, annotation);
+      sample.annotation = annotation;
+      updateAnnotationInMemory(sample.id, annotation);
+      postAnnotationToBridge(sample, annotation).catch(error => {
+        // Best-effort: bridge-sync is een aanvulling, geen vereiste voor
+        // eigen (IndexedDB) metingen — dus hier alleen loggen, niet falen.
+        log("Annotatie naar bridge sturen mislukt: " + error);
+      });
+      setDbInfo("Info opgeslagen", "ok");
+    }
     if (pendingAnnotationRedraw) pendingAnnotationRedraw();
     if (dialog && dialog.open) dialog.close();
   } catch (error) {
@@ -3094,19 +3111,14 @@ async function syncBridgeIntoToday() {
 }
 
 async function postAnnotationToBridge(sample, annotation) {
-  if (!bridgeAvailable) return;
-  try {
-    const ts = sample.source === "bridge" ? sample.bridge_ts : bridgeIsoString(sample.time);
-    await fetch(BRIDGE_URL + "/api/annotaties", {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ ts, type: "pwa", label: annotation, bpm: sample.bpm })
-    });
-  } catch (error) {
-    // Best-effort: bridge-sync is een aanvulling, geen vereiste. IndexedDB
-    // blijft de bron van waarheid als de Termux-server niet bereikbaar is.
-    log("Annotatie naar bridge sturen mislukt: " + error);
-  }
+  if (!bridgeAvailable) throw new Error("bridge niet bereikbaar");
+  const ts = sample.source === "bridge" ? sample.bridge_ts : bridgeIsoString(sample.time);
+  const res = await fetch(BRIDGE_URL + "/api/annotaties", {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ ts, type: "pwa", label: annotation, bpm: sample.bpm })
+  });
+  if (!res.ok) throw new Error("HTTP " + res.status);
 }
 
 // Bij opstarten stil controleren of de bridge-server bereikbaar is, zonder
