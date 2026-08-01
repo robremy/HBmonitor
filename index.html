@@ -2546,12 +2546,33 @@ function updateMovedAnnotationInMemory(sourceId, targetId, annotation) {
   }
 }
 
+async function writeAnnotationForSample(sample, annotation) {
+  if (sample.source === "bridge") {
+    await postAnnotationToBridge(sample, annotation);
+  } else {
+    await saveAnnotationIndexedDb(sample.id, annotation);
+  }
+}
+
 async function moveAnnotationToSample(sourceSample, targetSample, redraw) {
   if (!sourceSample?.id || !targetSample?.id || sourceSample.id === targetSample.id) return null;
   const annotation = sourceSample.annotation || "";
   if (!annotation) return null;
+  if (targetSample.annotation) {
+    setDbInfo("Op dit tijdstip staat al een annotatie", "bad");
+    log("Annotatie verplaatsen FOUT: doel heeft al een annotatie");
+    return null;
+  }
   try {
-    await moveAnnotationIndexedDb(sourceSample.id, targetSample.id, annotation);
+    // Bron en doel kunnen elk uit IndexedDB (eigen, rechtstreekse meting)
+    // of uit de bridge-database komen — dus los van elkaar afhandelen in
+    // plaats van aan te nemen dat beide altijd in dezelfde IndexedDB-store
+    // staan (dat klopt niet meer sinds bridge-punten meegemengd worden).
+    // Doel eerst schrijven, dan pas bron leegmaken: als het tweede deel
+    // faalt, staat de annotatie in het ergste geval dubbel i.p.v. helemaal
+    // kwijt.
+    await writeAnnotationForSample(targetSample, annotation);
+    await writeAnnotationForSample(sourceSample, "");
     updateMovedAnnotationInMemory(sourceSample.id, targetSample.id, annotation);
     sourceSample.annotation = "";
     targetSample.annotation = annotation;
