@@ -330,6 +330,7 @@
     <div id="storageInfo" class="status">Opslag: controleren...</div>
     <div id="bridgeInfo" class="status">Bridge: niet gecontroleerd</div>
     <button class="gray" type="button" onclick="syncBridgeIntoToday()">Sync met bridge</button>
+    <button id="bridgeAutoSyncButton" class="green" type="button" onclick="toggleBridgeAutoSync()">Auto-verversen: aan (30s)</button>
   </div>
 
   <div class="card">
@@ -1714,8 +1715,8 @@ async function onHeartRate(event) {
 // ALARM
 // ============================================================
 
-function checkAlarm(bpm) {
-  const now = Date.now();
+function checkAlarm(bpm, atMs = Date.now()) {
+  const now = atMs;
   const limit = getLimit();
   const requiredMs = getSecondsHigh() * 1000;
 
@@ -1732,9 +1733,9 @@ function checkAlarm(bpm) {
 
     if (
       now - aboveSince >= requiredMs &&
-      now - lastAlarm >= getCooldownMs()
+      Date.now() - lastAlarm >= getCooldownMs()
     ) {
-      lastAlarm = now;
+      lastAlarm = Date.now();
       triggerAlarm(bpm);
     }
   } else {
@@ -3021,6 +3022,7 @@ window.addEventListener("load", async () => {
 
 const BRIDGE_URL = "http://127.0.0.1:8787";
 let bridgeAvailable = false;
+let bridgeAutoSyncTimer = null;
 
 function setBridgeInfo(text, status) {
   const el = document.getElementById("bridgeInfo");
@@ -3137,11 +3139,91 @@ async function postAnnotationToBridge(sample, annotation) {
   if (!res.ok) throw new Error("HTTP " + res.status);
 }
 
-// Bij opstarten stil controleren of de bridge-server bereikbaar is, zonder
-// meteen data te syncen (dat blijft de "Sync met bridge"-knop, zodat het
-// niet ongevraagd de grafiek verandert).
+const AUTO_SYNC_INTERVAL_MS = 30000;
+async function pushInstellingenNaarBridge() {
+  if (!bridgeAvailable) return;
+  try {
+    const payload = {
+      limit: getLimit(),
+      secondsHigh: getSecondsHigh(),
+      cooldownSec: Math.round(getCooldownMs() / 1000)
+    };
+    const res = await fetch(BRIDGE_URL + "/api/instellingen", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(payload)
+    });
+    if (!res.ok) throw new Error("HTTP " + res.status);
+    log("Alarminstellingen naar bridge gestuurd: " + JSON.stringify(payload));
+  } catch (error) {
+    log("Instellingen naar bridge sturen mislukt: " + error);
+  }
+}
+
+// Instellingen debounced doorsturen zodra de gebruiker een van de
+// alarmvelden wijzigt, zodat de altijd-actieve Android-bridge-service
+// (niet deze pagina) ze binnen ~15 sec oppikt en er zelf naar handelt —
+// zie herlaadInstellingenIndienNodig() in HrBridgeService.kt.
+let instellingenPushTimer = null;
+function plannenInstellingenPush() {
+  if (instellingenPushTimer) clearTimeout(instellingenPushTimer);
+  instellingenPushTimer = setTimeout(pushInstellingenNaarBridge, 800);
+}
+["limit", "secondsHigh", "cooldown"].forEach(id => {
+  document.getElementById(id)?.addEventListener("input", plannenInstellingenPush);
+});
+
+let bridgeAutoSyncEnabled = true;
+
+function updateBridgeAutoSyncButton() {
+  const btn = document.getElementById("bridgeAutoSyncButton");
+  if (!btn) return;
+  btn.textContent = bridgeAutoSyncEnabled
+    ? "Auto-verversen: aan (30s)"
+    : "Auto-verversen: uit";
+  btn.className = bridgeAutoSyncEnabled ? "green" : "gray";
+}
+
+function startBridgeAutoSync() {
+  stopBridgeAutoSync();
+  bridgeAutoSyncTimer = setInterval(() => {
+    syncBridgeIntoToday();
+  }, AUTO_SYNC_INTERVAL_MS);
+}
+
+function stopBridgeAutoSync() {
+  if (bridgeAutoSyncTimer) {
+    clearInterval(bridgeAutoSyncTimer);
+    bridgeAutoSyncTimer = null;
+  }
+}
+
+function toggleBridgeAutoSync() {
+  bridgeAutoSyncEnabled = !bridgeAutoSyncEnabled;
+  updateBridgeAutoSyncButton();
+  if (bridgeAutoSyncEnabled) {
+    startBridgeAutoSync();
+  } else {
+    stopBridgeAutoSync();
+  }
+}
+
+// Bij opstarten stil controleren of de bridge-server bereikbaar is. Als hij
+// bereikbaar is: huidige alarminstellingen meteen doorsturen (zodat de
+// Android-service een actuele grens heeft, niet pas na de eerste
+// handmatige wijziging), en — als auto-verversen aan staat (standaard) —
+// de grafiek elke 30 sec bijwerken met bridge-data. Het alarm zelf wordt
+// niet meer hier getriggerd; dat doet de altijd-actieve Android-app.
 window.addEventListener("load", () => {
-  setTimeout(() => { checkBridgeAvailable(); }, 1500);
+  updateBridgeAutoSyncButton();
+  setTimeout(async () => {
+    const ok = await checkBridgeAvailable();
+    if (ok) {
+      await pushInstellingenNaarBridge();
+      await syncBridgeIntoToday();
+      if (bridgeAutoSyncEnabled) startBridgeAutoSync();
+    }
+  }, 1500);
 });
 </script>
 <script src="./features.js?v=2026.07.25-v25"></script>
