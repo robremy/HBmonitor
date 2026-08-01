@@ -2594,6 +2594,7 @@ function openAnnotationDialog(sample, redraw) {
   pendingAnnotationSample = sample;
   pendingAnnotationRedraw = redraw;
   refreshAnnotationSelect(sample.annotation || "");
+  info.style.color = "";
   info.textContent = `${new Date(sample.time).toLocaleTimeString([], {hour:"2-digit", minute:"2-digit", second:"2-digit"})} · ${sample.bpm} bpm`;
   if (!dialog.open) dialog.showModal();
 }
@@ -2601,17 +2602,29 @@ function openAnnotationDialog(sample, redraw) {
 async function commitAnnotation() {
   const dialog = document.getElementById("annotationDialog");
   const select = document.getElementById("annotationSelect");
+  const info = document.getElementById("annotationPointInfo");
   const sample = pendingAnnotationSample;
   if (!sample || !select) return;
   const annotation = select.value;
+
+  const toonDialogFout = (bericht) => {
+    // De statusregel op de onderliggende pagina is onzichtbaar zolang deze
+    // modal open staat — toon de fout daarom hier, in de dialoog zelf.
+    if (info) {
+      info.textContent = "⚠ " + bericht;
+      info.style.color = "#ff6b6b";
+    }
+  };
+
   try {
     if (sample.source === "bridge") {
       // Dit punt komt uit de bridge-database, niet uit IndexedDB — daar
-      // bestaat geen record met deze id om op te slaan. Schrijf de
-      // annotatie rechtstreeks (en wachten we er nu wél op, zodat een
-      // mislukte poging hier zichtbaar wordt in plaats van stil te falen).
-      if (!bridgeAvailable) {
-        throw new Error("Bridge niet bereikbaar — kan annotatie voor dit (bridge-)punt niet opslaan");
+      // bestaat geen record met deze id om op te slaan. Controleer de
+      // bridge-status hier opnieuw (niet de mogelijk verouderde vlag van
+      // bij het laden van de pagina), en schrijf de annotatie rechtstreeks.
+      const bereikbaar = await checkBridgeAvailable();
+      if (!bereikbaar) {
+        throw new Error("Bridge niet bereikbaar — is hr_sync_server.py nog actief in Termux?");
       }
       await postAnnotationToBridge(sample, annotation);
       sample.annotation = annotation;
@@ -2629,12 +2642,15 @@ async function commitAnnotation() {
     }
     if (pendingAnnotationRedraw) pendingAnnotationRedraw();
     if (dialog && dialog.open) dialog.close();
+    pendingAnnotationSample = null;
+    pendingAnnotationRedraw = null;
   } catch (error) {
     setDbInfo("Info opslaan fout", "bad");
     log("Info opslaan FOUT: " + error);
-  } finally {
-    pendingAnnotationSample = null;
-    pendingAnnotationRedraw = null;
+    toonDialogFout(error.message || String(error));
+    // pendingAnnotationSample bewust NIET wissen en dialoog open laten:
+    // zo blijft een nieuwe "Opslaan"-tik (bv. na herstel van de bridge-
+    // verbinding) mogelijk zonder het punt opnieuw te hoeven aantikken.
   }
 }
 
