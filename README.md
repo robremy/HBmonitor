@@ -41,6 +41,11 @@ Settings → Share HR → On
 Alle hartslagmetingen blijven lokaal in Chrome IndexedDB op het apparaat.
 Gebruik "Download CSV vandaag" om data te exporteren.
 
+## Versie 2026.08.02-v28
+
+- Bugfix: bij opstarten probeerde de PWA altijd zelf direct via Web Bluetooth met de band te verbinden (`autoConnectLastBandOnStartup`), ook als de altijd-actieve Android-bridge-service de band al vasthield. Dit gaf de misleidende melding "Band toestemming niet automatisch teruggevonden. Druk eenmaal op Opnieuw verbinden." — niet omdat de toestemming echt kwijt was, maar omdat de directe verbindingspoging altijd liep, ongeacht bridge-status, en om dezelfde BLE-verbindingsslot van de band concurreerde met de Android-service.
+- `autoConnectLastBandOnStartup()` controleert nu eerst of de bridge bereikbaar is; zo ja, dan wordt de automatische directe verbinding overgeslagen en wordt vertrouwd op de bridge voor live data. Handmatig verbinden via de knop blijft altijd mogelijk.
+
 ## Versie 2026.08.02-v27
 
 - Bugfix: het alarm van de altijd-actieve Android-achtergronddienst (HrBridgeService) trilde altijd, ook als de PWA op "Alarm: audio" stond. Twee oorzaken: (1) de gekozen modus werd nooit naar de bridge gestuurd (`pushInstellingenNaarBridge()` stuurde alleen limit/secondsHigh/cooldownSec), en (2) `HrBridgeService.kt` las de modus sowieso niet uit en had geen geluidsafspeel-logica — alleen trillen.

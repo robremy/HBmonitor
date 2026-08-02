@@ -318,7 +318,7 @@
     <div id="deviceName" class="status"></div>
     <div id="lastDeviceInfo" class="status"></div>
     <div id="wakeLockInfo" class="status">Screen wakelock: niet actief</div>
-    <div id="softwareVersionInfo" class="status">Softwareversie: 2026.08.02-v27</div>
+    <div id="softwareVersionInfo" class="status">Softwareversie: 2026.08.02-v28</div>
     <div id="updateInfo" class="update-line" role="status" aria-live="polite">
       <strong>Nieuwe softwareversie beschikbaar.</strong><br>
       Werk bij wanneer de hartslagmeting veilig onderbroken kan worden.<br>
@@ -425,7 +425,7 @@
 <script>
 "use strict";
 
-const SOFTWARE_VERSION = "2026.08.02-v27";
+const SOFTWARE_VERSION = "2026.08.02-v28";
 
 const HR_SERVICE = "0000180d-0000-1000-8000-00805f9b34fb";
 const HR_MEASUREMENT = "00002a37-0000-1000-8000-00805f9b34fb";
@@ -718,7 +718,7 @@ async function registerServiceWorker() {
   }
 
   try {
-    const registration = await navigator.serviceWorker.register("./sw.js?v=2026.08.02-v27", {
+    const registration = await navigator.serviceWorker.register("./sw.js?v=2026.08.02-v28", {
       scope: "./",
       updateViaCache: "none"
     });
@@ -1400,6 +1400,21 @@ async function restoreDeviceReference() {
 async function autoConnectLastBandOnStartup() {
   await requestScreenWakeLock();
   updateLastDeviceInfo();
+
+  // Als de altijd-actieve Android-bridge-service al bereikbaar is, houdt
+  // die de BLE-verbinding met de band vast en levert de data via de bridge.
+  // Zelf ook automatisch proberen te verbinden zou daarmee concurreren om
+  // dezelfde (doorgaans enkele) GATT-verbindingsslot van de band, en gaf
+  // hier precies de waarschuwing "Band toestemming niet automatisch
+  // teruggevonden" — niet omdat de toestemming echt weg was, maar omdat dit
+  // altijd probeerde ongeacht of de bridge al actief was. Direct verbinden
+  // blijft wel gewoon mogelijk via de knop "Opnieuw verbinden".
+  const bridgeActief = await checkBridgeAvailable();
+  if (bridgeActief) {
+    log("Bridge actief; automatische directe bandverbinding overgeslagen.");
+    setStatus("Verbonden via bridge.", "ok");
+    return;
+  }
 
   const lastName = localStorage.getItem(STORAGE_LAST_NAME);
   if (!lastName) {
@@ -3302,6 +3317,6 @@ window.addEventListener("load", () => {
   }, 1500);
 });
 </script>
-<script src="./features.js?v=2026.08.02-v27"></script>
+<script src="./features.js?v=2026.08.02-v28"></script>
 </body>
 </html>
