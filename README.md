@@ -41,6 +41,12 @@ Settings → Share HR → On
 Alle hartslagmetingen blijven lokaal in Chrome IndexedDB op het apparaat.
 Gebruik "Download CSV vandaag" om data te exporteren.
 
+## Versie 2026.08.02-v27
+
+- Bugfix: het alarm van de altijd-actieve Android-achtergronddienst (HrBridgeService) trilde altijd, ook als de PWA op "Alarm: audio" stond. Twee oorzaken: (1) de gekozen modus werd nooit naar de bridge gestuurd (`pushInstellingenNaarBridge()` stuurde alleen limit/secondsHigh/cooldownSec), en (2) `HrBridgeService.kt` las de modus sowieso niet uit en had geen geluidsafspeel-logica — alleen trillen.
+- De PWA stuurt de alarmmodus nu direct mee bij het wisselen van de knop (niet alleen bij wijzigen van de tekstvelden), en `HrBridgeService.kt` leest en respecteert deze modus, met een nieuwe `speelAlarmGeluid()`-functie die een Ringtone met `AudioAttributes(USAGE_ALARM)` afspeelt.
+- Het alarmkanaal-ID is gewijzigd naar `hr_bridge_alarm_channel_v2` omdat een Android-notificatiekanaal na aanmaken onveranderlijk is qua geluidsinstelling; een kanaal dat ooit zonder geluid werd aangemaakt bleef dat voor altijd, ongeacht latere codewijzigingen.
+
 ## Versie 2026.08.02-v26
 
 - Bugfix: bridge-sync (Termux hr_sync_server.py) haalde altijd alleen de metingen van vandaag op en sloeg ze nooit in IndexedDB op — alleen in het tijdelijke geheugen. Hierdoor ontbrak data in de grafiek van eerdere dagen zodra de pagina herlaadde of de kalenderdag omsloeg, ook als de metingen wel degelijk in de bridge-database (hbmonitor.db) stonden.
