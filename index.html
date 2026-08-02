@@ -318,7 +318,7 @@
     <div id="deviceName" class="status"></div>
     <div id="lastDeviceInfo" class="status"></div>
     <div id="wakeLockInfo" class="status">Screen wakelock: niet actief</div>
-    <div id="softwareVersionInfo" class="status">Softwareversie: 2026.08.02-v29</div>
+    <div id="softwareVersionInfo" class="status">Softwareversie: 2026.08.02-v30</div>
     <div id="updateInfo" class="update-line" role="status" aria-live="polite">
       <strong>Nieuwe softwareversie beschikbaar.</strong><br>
       Werk bij wanneer de hartslagmeting veilig onderbroken kan worden.<br>
@@ -425,7 +425,7 @@
 <script>
 "use strict";
 
-const SOFTWARE_VERSION = "2026.08.02-v29";
+const SOFTWARE_VERSION = "2026.08.02-v30";
 
 const HR_SERVICE = "0000180d-0000-1000-8000-00805f9b34fb";
 const HR_MEASUREMENT = "00002a37-0000-1000-8000-00805f9b34fb";
@@ -718,7 +718,7 @@ async function registerServiceWorker() {
   }
 
   try {
-    const registration = await navigator.serviceWorker.register("./sw.js?v=2026.08.02-v29", {
+    const registration = await navigator.serviceWorker.register("./sw.js?v=2026.08.02-v30", {
       scope: "./",
       updateViaCache: "none"
     });
@@ -3160,6 +3160,14 @@ async function fetchBridgeAnnotaties(dateKey) {
 // Nu wordt elke bridge-meting via saveSampleIndexedDb() opgeslagen met
 // dezelfde vorm als rechtstreekse Web Bluetooth-metingen, zodat de
 // bestaande historische weergave (getSamplesByDate) ze gewoon meeneemt.
+// Onthoudt per dag de hoogste bridge-ts die al naar IndexedDB is
+// weggeschreven. Zonder dit zou elke sync-cyclus de HELE dag opnieuw
+// schrijven (put() per meting) — bij een korte sync-interval en duizenden
+// metingen per dag wordt dat te zwaar. fetchBridgeMetingen() haalt zelf nog
+// steeds de hele dag op (de bridge-server ondersteunt geen "sinds"-filter),
+// maar we slaan alleen het nieuwe stuk daadwerkelijk op.
+const bridgeLaatstVerwerkteTs = {};
+
 async function syncBridgeData(dateKey) {
   const ok = await checkBridgeAvailable();
   if (!ok) return false;
@@ -3194,9 +3202,16 @@ async function syncBridgeData(dateKey) {
       };
     });
 
+    // Alleen metingen die nog niet eerder deze sessie zijn weggeschreven.
+    // Kanttekening: een annotatie die achteraf op een al-gesynchroniseerde
+    // (oudere) meting wordt gezet, komt hierdoor pas bij de volgende
+    // volledige herlaad (paginaherlaad) door — niet binnen dezelfde sessie.
+    const laatsteTs = bridgeLaatstVerwerkteTs[dateKey] || 0;
+    const nieuweBridgeSamples = bridgeSamples.filter(s => s.bridge_ts > laatsteTs);
+
     // Permanent opslaan. put() dedupliceert vanzelf op id ("bridge_"+ts),
     // dus herhaald syncen van dezelfde dag stapelt niets op.
-    for (const sample of bridgeSamples) {
+    for (const sample of nieuweBridgeSamples) {
       try {
         await saveSampleIndexedDb(sample);
       } catch (error) {
@@ -3236,7 +3251,15 @@ async function syncBridgeData(dateKey) {
       drawChart();
     }
 
-    setBridgeInfo("Bridge: " + metingen.length + " metingen gesynchroniseerd (" + dateKey + ")", "ok");
+    if (bridgeSamples.length > 0) {
+      const maxTs = bridgeSamples.reduce((max, s) => Math.max(max, s.bridge_ts), laatsteTs);
+      bridgeLaatstVerwerkteTs[dateKey] = maxTs;
+    }
+
+    setBridgeInfo(
+      "Bridge: " + metingen.length + " metingen (" + nieuweBridgeSamples.length + " nieuw, " + dateKey + ")",
+      "ok"
+    );
     return metingen.length;
   } catch (error) {
     setBridgeInfo("Bridge sync fout: " + error, "bad");
@@ -3263,7 +3286,7 @@ async function postAnnotationToBridge(sample, annotation) {
   if (!res.ok) throw new Error("HTTP " + res.status);
 }
 
-const AUTO_SYNC_INTERVAL_MS = 30000;
+const AUTO_SYNC_INTERVAL_MS = 5000;
 async function pushInstellingenNaarBridge() {
   if (!bridgeAvailable) return;
   try {
@@ -3304,7 +3327,7 @@ function updateBridgeAutoSyncButton() {
   const btn = document.getElementById("bridgeAutoSyncButton");
   if (!btn) return;
   btn.textContent = bridgeAutoSyncEnabled
-    ? "Auto-verversen: aan (30s)"
+    ? "Auto-verversen: aan (5s)"
     : "Auto-verversen: uit";
   btn.className = bridgeAutoSyncEnabled ? "green" : "gray";
 }
@@ -3351,6 +3374,6 @@ window.addEventListener("load", () => {
   }, 1500);
 });
 </script>
-<script src="./features.js?v=2026.08.02-v29"></script>
+<script src="./features.js?v=2026.08.02-v30"></script>
 </body>
 </html>

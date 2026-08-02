@@ -41,6 +41,12 @@ Settings → Share HR → On
 Alle hartslagmetingen blijven lokaal in Chrome IndexedDB op het apparaat.
 Gebruik "Download CSV vandaag" om data te exporteren.
 
+## Versie 2026.08.02-v30
+
+- Auto-verversen van de grafiek via de bridge staat nu op 5s in plaats van 30s, voor een meer real-time weergave zonder de Android-service en de PWA om dezelfde BLE-verbinding met de band te laten concurreren.
+- Om dit haalbaar te maken bij een groeiend aantal metingen per dag: `syncBridgeData()` schrijft per sync-cyclus nu alleen de metingen die nog niet eerder deze sessie zijn opgeslagen (bijgehouden per dag), in plaats van bij elke cyclus de hele dag opnieuw naar IndexedDB weg te schrijven. De bridge-server zelf levert nog steeds de hele dag per aanroep (geen "sinds"-filter beschikbaar); alleen de IndexedDB-schrijfstap is nu incrementeel.
+- Kanttekening: een annotatie die achteraf op een al-gesynchroniseerde (oudere) meting wordt gezet, komt door deze optimalisatie pas bij een volledige paginaherlaad door, niet al binnen dezelfde sessie.
+
 ## Versie 2026.08.02-v29
 
 - HrBridgeService.kt speelt in audio-modus nu exact dezelfde toon als de PWA: een gesynthetiseerde 950 Hz toon (500 ms aan / 250 ms stil, 5 keer herhaald) via AudioTrack, in plaats van het systeem-standaard alarmgeluid van het toestel. Kanaal-ID gewijzigd naar `hr_bridge_alarm_channel_v3` en het kanaal zelf is nu stil (geen kanaal-geluid/trillen meer) — geluid en trillen worden voortaan volledig programmatisch geregeld, zodat er niet twee dingen tegelijk afgaan.
