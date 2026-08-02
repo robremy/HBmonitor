@@ -41,6 +41,12 @@ Settings → Share HR → On
 Alle hartslagmetingen blijven lokaal in Chrome IndexedDB op het apparaat.
 Gebruik "Download CSV vandaag" om data te exporteren.
 
+## Versie 2026.08.02-v29
+
+- HrBridgeService.kt speelt in audio-modus nu exact dezelfde toon als de PWA: een gesynthetiseerde 950 Hz toon (500 ms aan / 250 ms stil, 5 keer herhaald) via AudioTrack, in plaats van het systeem-standaard alarmgeluid van het toestel. Kanaal-ID gewijzigd naar `hr_bridge_alarm_channel_v3` en het kanaal zelf is nu stil (geen kanaal-geluid/trillen meer) — geluid en trillen worden voortaan volledig programmatisch geregeld, zodat er niet twee dingen tegelijk afgaan.
+- "Stop alarm" doet nu echt iets op de Android-service, niet alleen lokaal in de browser. De knop stuurt meteen (niet gedebounced) een `stopAlarmMs`-signaal naar de bridge via `/api/instellingen`; `HrBridgeService.kt` pollt tijdens een actief alarm elke 250ms op dit signaal (los van de gebruikelijke 15s-instellingenpoll) en breekt trillen/geluid direct af via `vibrator.cancel()` / `audioTrack.stop()`, en annuleert de alarmnotificatie.
+- De knop stopt nu ook de browser-lokale audio-bliep-lus (voorheen liep die gewoon door tot het einde) en herstelt de kaartstijl (rode "alarm"-rand) direct, in plaats van te wachten tot de hartslag weer onder de grens zakt.
+
 ## Versie 2026.08.02-v28
 
 - Bugfix: bij opstarten probeerde de PWA altijd zelf direct via Web Bluetooth met de band te verbinden (`autoConnectLastBandOnStartup`), ook als de altijd-actieve Android-bridge-service de band al vasthield. Dit gaf de misleidende melding "Band toestemming niet automatisch teruggevonden. Druk eenmaal op Opnieuw verbinden." — niet omdat de toestemming echt kwijt was, maar omdat de directe verbindingspoging altijd liep, ongeacht bridge-status, en om dezelfde BLE-verbindingsslot van de band concurreerde met de Android-service.
