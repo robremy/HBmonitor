@@ -318,7 +318,7 @@
     <div id="deviceName" class="status"></div>
     <div id="lastDeviceInfo" class="status"></div>
     <div id="wakeLockInfo" class="status">Screen wakelock: niet actief</div>
-    <div id="softwareVersionInfo" class="status">Softwareversie: 2026.07.25-v25</div>
+    <div id="softwareVersionInfo" class="status">Softwareversie: 2026.08.02-v26</div>
     <div id="updateInfo" class="update-line" role="status" aria-live="polite">
       <strong>Nieuwe softwareversie beschikbaar.</strong><br>
       Werk bij wanneer de hartslagmeting veilig onderbroken kan worden.<br>
@@ -425,7 +425,7 @@
 <script>
 "use strict";
 
-const SOFTWARE_VERSION = "2026.07.25-v25";
+const SOFTWARE_VERSION = "2026.08.02-v26";
 
 const HR_SERVICE = "0000180d-0000-1000-8000-00805f9b34fb";
 const HR_MEASUREMENT = "00002a37-0000-1000-8000-00805f9b34fb";
@@ -718,7 +718,7 @@ async function registerServiceWorker() {
   }
 
   try {
-    const registration = await navigator.serviceWorker.register("./sw.js?v=2026.07.25-v25", {
+    const registration = await navigator.serviceWorker.register("./sw.js?v=2026.08.02-v26", {
       scope: "./",
       updateViaCache: "none"
     });
@@ -3096,12 +3096,19 @@ async function fetchBridgeAnnotaties(dateKey) {
   return res.json();
 }
 
-async function syncBridgeIntoToday() {
+// Haalt bridge-metingen op voor een willekeurige dag (niet alleen vandaag)
+// en slaat ze permanent op in IndexedDB. Dit was de kern van de "data mist
+// in grafiek van gisteren"-bug: metingen kwamen alleen in het in-memory
+// todaySamples-array terecht en werden nooit in IndexedDB geschreven, dus
+// gingen ze verloren zodra de pagina herlaadde of de kalenderdag omsloeg.
+// Nu wordt elke bridge-meting via saveSampleIndexedDb() opgeslagen met
+// dezelfde vorm als rechtstreekse Web Bluetooth-metingen, zodat de
+// bestaande historische weergave (getSamplesByDate) ze gewoon meeneemt.
+async function syncBridgeData(dateKey) {
   const ok = await checkBridgeAvailable();
   if (!ok) return false;
 
   try {
-    const dateKey = getDayKey(new Date());
     const [metingen, annotaties] = await Promise.all([
       fetchBridgeMetingen(dateKey),
       fetchBridgeAnnotaties(dateKey)
@@ -3115,38 +3122,78 @@ async function syncBridgeIntoToday() {
       const ms = bridgeTsToMs(m.ts);
       return {
         id: "bridge_" + m.ts,
-        time: ms,
-        label: new Date(ms).toLocaleTimeString(),
+        ts_ms: ms,
+        ts_local: bridgeIsoString(ms),
+        date_key: dateKey,
+        time_label: new Date(ms).toLocaleTimeString(),
         bpm: m.bpm,
         alarm_limit: limit,
         above_limit: m.bpm > limit ? 1 : 0,
+        contact: "onbekend (bridge)",
+        device_name: "bridge",
+        alarm_mode: alarmMode,
         annotation: annotatieByTs[m.ts] || "",
         source: "bridge",
         bridge_ts: m.ts
       };
     });
 
-    // Eigen (rechtstreekse Web Bluetooth) metingen blijven staan; alleen de
-    // bridge-metingen worden bij elke sync ververst, zodat herhaald syncen
-    // geen duplicaten opstapelt. Op seconde-niveau dedupliceren voorkomt dat
-    // hetzelfde moment twee keer getekend wordt als beide bronnen actief
-    // waren.
-    const eigenSamples = todaySamples.filter(sample => sample.source !== "bridge");
-    const eigenTijden = new Set(eigenSamples.map(sample => Math.floor(sample.time / 1000)));
-    const aanvullendeBridgeSamples = bridgeSamples.filter(
-      sample => !eigenTijden.has(Math.floor(sample.time / 1000))
-    );
+    // Permanent opslaan. put() dedupliceert vanzelf op id ("bridge_"+ts),
+    // dus herhaald syncen van dezelfde dag stapelt niets op.
+    for (const sample of bridgeSamples) {
+      try {
+        await saveSampleIndexedDb(sample);
+      } catch (error) {
+        log("Bridge-meting opslaan in IndexedDB mislukt: " + error);
+      }
+    }
 
-    todaySamples = eigenSamples.concat(aanvullendeBridgeSamples).sort((a, b) => a.time - b.time);
+    // Alleen voor vandaag ook direct het in-memory array bijwerken, zodat de
+    // live grafiek meteen ververst zonder te wachten op een herlaad. Voor
+    // andere dagen wordt de grafiek elders opnieuw uit IndexedDB geladen.
+    const todayKey = getDayKey(new Date());
+    if (dateKey === todayKey) {
+      const mappedBridgeSamples = bridgeSamples.map(s => ({
+        id: s.id,
+        time: s.ts_ms,
+        label: s.time_label,
+        bpm: s.bpm,
+        alarm_limit: s.alarm_limit,
+        above_limit: s.above_limit,
+        annotation: s.annotation,
+        source: "bridge",
+        bridge_ts: s.bridge_ts
+      }));
 
-    drawChart();
-    setBridgeInfo("Bridge: " + metingen.length + " metingen gesynchroniseerd", "ok");
-    return true;
+      // Eigen (rechtstreekse Web Bluetooth) metingen blijven staan; alleen de
+      // bridge-metingen worden bij elke sync ververst, zodat herhaald syncen
+      // geen duplicaten opstapelt. Op seconde-niveau dedupliceren voorkomt dat
+      // hetzelfde moment twee keer getekend wordt als beide bronnen actief
+      // waren.
+      const eigenSamples = todaySamples.filter(sample => sample.source !== "bridge");
+      const eigenTijden = new Set(eigenSamples.map(sample => Math.floor(sample.time / 1000)));
+      const aanvullendeBridgeSamples = mappedBridgeSamples.filter(
+        sample => !eigenTijden.has(Math.floor(sample.time / 1000))
+      );
+
+      todaySamples = eigenSamples.concat(aanvullendeBridgeSamples).sort((a, b) => a.time - b.time);
+      drawChart();
+    }
+
+    setBridgeInfo("Bridge: " + metingen.length + " metingen gesynchroniseerd (" + dateKey + ")", "ok");
+    return metingen.length;
   } catch (error) {
     setBridgeInfo("Bridge sync fout: " + error, "bad");
     log("Bridge sync FOUT: " + error);
     return false;
   }
+}
+
+// Bestaande knop/auto-sync-timer blijven werken zoals voorheen: alleen
+// vandaag, lichtgewicht, elke 30s.
+async function syncBridgeIntoToday() {
+  const result = await syncBridgeData(getDayKey(new Date()));
+  return result !== false;
 }
 
 async function postAnnotationToBridge(sample, annotation) {
@@ -3247,6 +3294,6 @@ window.addEventListener("load", () => {
   }, 1500);
 });
 </script>
-<script src="./features.js?v=2026.07.25-v25"></script>
+<script src="./features.js?v=2026.08.02-v26"></script>
 </body>
 </html>

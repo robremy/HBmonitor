@@ -1,6 +1,6 @@
 /*
  * Heart Rate Alert gegevensbeheer en historische grafieken
- * Versie: 2026.07.25-v25
+ * Versie: 2026.08.02-v26
  *
  * Functies:
  * - Export van alle opgeslagen dagen naar één CSV-bestand
@@ -11,7 +11,7 @@
 "use strict";
 
 (() => {
-  const FEATURE_VERSION = "2026.07.25-v25";
+  const FEATURE_VERSION = "2026.08.02-v26";
   const CSV_HEADERS = [
     "id",
     "ts_ms",
@@ -249,6 +249,22 @@
       recentDaySamples.clear();
       for (let daysAgo = 0; daysAgo < RECENT_DAY_COUNT; daysAgo += 1) {
         const dateKey = dateKeyDaysAgo(daysAgo);
+
+        // Best-effort backfill: haal bridge-metingen voor DEZE specifieke
+        // dag op (niet alleen vandaag) en schrijf ze naar IndexedDB, vóórdat
+        // we uit IndexedDB lezen. Dit voorkomt dat metingen die de bridge
+        // ontving terwijl de PWA niet open was (of na het omslaan van de
+        // kalenderdag) onbereikbaar blijven. Mislukt de bridge-aanroep (bv.
+        // niet bereikbaar), dan gaan we gewoon door met wat al lokaal
+        // opgeslagen is.
+        if (typeof syncBridgeData === "function") {
+          try {
+            await syncBridgeData(dateKey);
+          } catch (error) {
+            log("Bridge-backfill voor " + dateKey + " mislukt: " + error);
+          }
+        }
+
         const rows = await getSamplesByDate(dateKey);
         const mapped = mapStoredRowsForGraph(rows);
         recentDaySamples.set(dateKey, mapped);

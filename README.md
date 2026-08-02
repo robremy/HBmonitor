@@ -41,6 +41,12 @@ Settings → Share HR → On
 Alle hartslagmetingen blijven lokaal in Chrome IndexedDB op het apparaat.
 Gebruik "Download CSV vandaag" om data te exporteren.
 
+## Versie 2026.08.02-v26
+
+- Bugfix: bridge-sync (Termux hr_sync_server.py) haalde altijd alleen de metingen van vandaag op en sloeg ze nooit in IndexedDB op — alleen in het tijdelijke geheugen. Hierdoor ontbrak data in de grafiek van eerdere dagen zodra de pagina herlaadde of de kalenderdag omsloeg, ook als de metingen wel degelijk in de bridge-database (hbmonitor.db) stonden.
+- `syncBridgeIntoToday()` is vervangen door de algemenere `syncBridgeData(dateKey)`, die voor elke zichtbare dag (vandaag + de 3 voorgaande) bridge-metingen ophaalt en permanent wegschrijft naar IndexedDB via `saveSampleIndexedDb()`, met dedup op basis van de meting-id.
+- Het laden van de recente daggrafieken (`loadRecentDayCharts`) doet nu voor elke dag eerst een best-effort bridge-backfill vóór het lezen uit IndexedDB.
+
 ## Versie 2026.07.25-v25
 
 - README bijgewerkt met een volledige set schermafbeeldingen: overzicht, ingezoomde grafiek, bediening, log, info toevoegen, annotatie-opties, gegevens exporteren/importeren, widget-info en Bluetooth-koppeling.
