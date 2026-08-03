@@ -41,6 +41,11 @@ Settings → Share HR → On
 Alle hartslagmetingen blijven lokaal in Chrome IndexedDB op het apparaat.
 Gebruik "Download CSV vandaag" om data te exporteren.
 
+## Versie 2026.08.02-v32
+
+- Kritieke bugfix in de v30-optimalisatie: `bridge_ts` is een ISO-datumtijd-STRING (Android's `ts TEXT PRIMARY KEY`), geen getal. De nieuwe-metingen-filter vergeleek deze string rechtstreeks met een numerieke watermark (`s.bridge_ts > laatsteTs`), wat door JavaScript's type-omzetting altijd `NaN`/`false` opleverde. Gevolg: na de allereerste sync bij het laden van de pagina werd `nieuweBridgeSamples` blijvend leeg — geen nieuwe IndexedDB-writes meer, en de live-uitlezing (net toegevoegd in v31) kreeg dus ook nooit data te zien.
+- Gefixt door te vergelijken met `ts_ms` (al omgezet naar numerieke epoch-milliseconden) in plaats van `bridge_ts` zelf, zowel bij het filteren als bij het bijwerken van de watermark.
+
 ## Versie 2026.08.02-v31
 
 - Bugfix: de live hartslag-uitlezing ("Hartslag: -- bpm") en het contact-veld werden uitsluitend bijgewerkt vanuit `onHeartRate()`, de rechtstreekse Web Bluetooth-callback. Bij bridge-only gebruik (geen directe BLE-verbinding vanuit de browser, alleen via de Android-bridge-service) werd die functie nooit aangeroepen, dus bleef de live-uitlezing permanent op "--" staan, ondanks dat de grafiek en opslag wel gewoon bijgewerkt werden.
