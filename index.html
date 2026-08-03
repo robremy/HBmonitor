@@ -318,7 +318,7 @@
     <div id="deviceName" class="status"></div>
     <div id="lastDeviceInfo" class="status"></div>
     <div id="wakeLockInfo" class="status">Screen wakelock: niet actief</div>
-    <div id="softwareVersionInfo" class="status">Softwareversie: 2026.08.02-v30</div>
+    <div id="softwareVersionInfo" class="status">Softwareversie: 2026.08.02-v31</div>
     <div id="updateInfo" class="update-line" role="status" aria-live="polite">
       <strong>Nieuwe softwareversie beschikbaar.</strong><br>
       Werk bij wanneer de hartslagmeting veilig onderbroken kan worden.<br>
@@ -425,7 +425,7 @@
 <script>
 "use strict";
 
-const SOFTWARE_VERSION = "2026.08.02-v30";
+const SOFTWARE_VERSION = "2026.08.02-v31";
 
 const HR_SERVICE = "0000180d-0000-1000-8000-00805f9b34fb";
 const HR_MEASUREMENT = "00002a37-0000-1000-8000-00805f9b34fb";
@@ -718,7 +718,7 @@ async function registerServiceWorker() {
   }
 
   try {
-    const registration = await navigator.serviceWorker.register("./sw.js?v=2026.08.02-v30", {
+    const registration = await navigator.serviceWorker.register("./sw.js?v=2026.08.02-v31", {
       scope: "./",
       updateViaCache: "none"
     });
@@ -3249,6 +3249,29 @@ async function syncBridgeData(dateKey) {
 
       todaySamples = eigenSamples.concat(aanvullendeBridgeSamples).sort((a, b) => a.time - b.time);
       drawChart();
+
+      // De live-uitlezing (#liveHeartRate, #contact) en de
+      // "geen recente data"-detectie (lastHeartRateAt) werden tot nu toe
+      // uitsluitend bijgewerkt vanuit onHeartRate(), de rechtstreekse Web
+      // Bluetooth-callback. Bij bridge-only gebruik (geen directe BLE-
+      // verbinding vanuit de browser) werd die dus nooit aangeroepen, en
+      // bleef "Hartslag: -- bpm" voor altijd staan ondanks binnenkomende
+      // bridge-data. Alleen bijwerken als de nieuwste bridge-meting
+      // daadwerkelijk recenter is dan wat we al hebben — zo overschrijft een
+      // trage bridge-sync nooit een verse rechtstreekse BLE-meting.
+      const nieuwsteBridgeSample = nieuweBridgeSamples.reduce(
+        (nieuwste, s) => (!nieuwste || s.ts_ms > nieuwste.ts_ms ? s : nieuwste),
+        null
+      );
+      if (nieuwsteBridgeSample && nieuwsteBridgeSample.ts_ms > lastHeartRateAt) {
+        lastHeartRateAt = nieuwsteBridgeSample.ts_ms;
+        const liveHeartRateEl = document.getElementById("liveHeartRate");
+        if (liveHeartRateEl) {
+          liveHeartRateEl.textContent = "Hartslag: " + nieuwsteBridgeSample.bpm + " bpm (bridge)";
+        }
+        const contactEl = document.getElementById("contact");
+        if (contactEl) contactEl.textContent = "Contact: via bridge";
+      }
     }
 
     if (bridgeSamples.length > 0) {
@@ -3374,6 +3397,6 @@ window.addEventListener("load", () => {
   }, 1500);
 });
 </script>
-<script src="./features.js?v=2026.08.02-v30"></script>
+<script src="./features.js?v=2026.08.02-v31"></script>
 </body>
 </html>

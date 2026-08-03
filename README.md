@@ -41,6 +41,11 @@ Settings → Share HR → On
 Alle hartslagmetingen blijven lokaal in Chrome IndexedDB op het apparaat.
 Gebruik "Download CSV vandaag" om data te exporteren.
 
+## Versie 2026.08.02-v31
+
+- Bugfix: de live hartslag-uitlezing ("Hartslag: -- bpm") en het contact-veld werden uitsluitend bijgewerkt vanuit `onHeartRate()`, de rechtstreekse Web Bluetooth-callback. Bij bridge-only gebruik (geen directe BLE-verbinding vanuit de browser, alleen via de Android-bridge-service) werd die functie nooit aangeroepen, dus bleef de live-uitlezing permanent op "--" staan, ondanks dat de grafiek en opslag wel gewoon bijgewerkt werden.
+- `syncBridgeData()` werkt nu ook `#liveHeartRate` en `#contact` bij vanuit de nieuwste binnengekomen bridge-meting (alleen als die daadwerkelijk recenter is dan wat al bekend was, zodat een trage bridge-sync nooit een verse rechtstreekse BLE-meting overschrijft), en werkt `lastHeartRateAt` bij zodat de "geen recente data"-detectie ook bij bridge-only gebruik correct blijft.
+
 ## Versie 2026.08.02-v30
 
 - Auto-verversen van de grafiek via de bridge staat nu op 5s in plaats van 30s, voor een meer real-time weergave zonder de Android-service en de PWA om dezelfde BLE-verbinding met de band te laten concurreren.
