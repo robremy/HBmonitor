@@ -1,6 +1,6 @@
 /*
  * Heart Rate Alert gegevensbeheer en historische grafieken
- * Versie: 2026.08.04-v36
+ * Versie: 2026.08.03-v34
  *
  * Functies:
  * - Export van alle opgeslagen dagen naar één CSV-bestand
@@ -11,7 +11,7 @@
 "use strict";
 
 (() => {
-  const FEATURE_VERSION = "2026.08.04-v36";
+  const FEATURE_VERSION = "2026.08.03-v34";
   const CSV_HEADERS = [
     "id",
     "ts_ms",
@@ -238,7 +238,7 @@
     }
   }
 
-  const loadRecentDayCharts = window.loadRecentDayCharts = async function loadRecentDayCharts() {
+  async function loadRecentDayCharts() {
     if (recentChartsLoadPromise) {
       return recentChartsLoadPromise;
     }
@@ -249,10 +249,6 @@
       recentDaySamples.clear();
       for (let daysAgo = 0; daysAgo < RECENT_DAY_COUNT; daysAgo += 1) {
         const dateKey = dateKeyDaysAgo(daysAgo);
-        const voortgang = "Synchroniseren dag " + (daysAgo + 1) + "/" + RECENT_DAY_COUNT + " (" + dateKey + ")...";
-        if (typeof setBridgeInfo === "function") {
-          setBridgeInfo(voortgang, "ok");
-        }
 
         // Best-effort backfill: haal bridge-metingen voor DEZE specifieke
         // dag op (niet alleen vandaag) en schrijf ze naar IndexedDB, vóórdat
@@ -289,9 +285,6 @@
       }
       drawChart();
       drawRecentDayCharts();
-      // syncBridgeData() heeft setBridgeInfo al bijgewerkt met het resultaat
-      // van de laatst gesynchroniseerde dag (vandaag); dat blijft staan als
-      // eindstatus in plaats van de voortgangstekst.
     })();
 
     try {
@@ -299,7 +292,7 @@
     } finally {
       recentChartsLoadPromise = null;
     }
-  };
+  }
 
   async function loadSelectedDate() {
     const input = document.getElementById("historyDate");
