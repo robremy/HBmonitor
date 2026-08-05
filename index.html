@@ -318,7 +318,7 @@
     <div id="deviceName" class="status"></div>
     <div id="lastDeviceInfo" class="status"></div>
     <div id="wakeLockInfo" class="status">Screen wakelock: niet actief</div>
-    <div id="softwareVersionInfo" class="status">Softwareversie: 2026.08.03-v34</div>
+    <div id="softwareVersionInfo" class="status">Softwareversie: 2026.08.03-v35</div>
     <div id="updateInfo" class="update-line" role="status" aria-live="polite">
       <strong>Nieuwe softwareversie beschikbaar.</strong><br>
       Werk bij wanneer de hartslagmeting veilig onderbroken kan worden.<br>
@@ -330,7 +330,12 @@
     <div id="storageInfo" class="status">Opslag: controleren...</div>
     <div id="bridgeInfo" class="status">Bridge: niet gecontroleerd</div>
     <button class="gray" type="button" onclick="syncBridgeIntoToday()">Sync met bridge</button>
-    <button id="bridgeAutoSyncButton" class="green" type="button" onclick="toggleBridgeAutoSync()">Auto-verversen: aan (30s)</button>
+    <button id="bridgeAutoSyncButton" class="green" type="button" onclick="toggleBridgeAutoSync()">Auto-verversen: aan</button>
+    <label>
+      Sync elke
+      <input id="bridgeAutoSyncSeconds" type="number" min="1" max="300" step="1" value="5" style="width:4em;" />
+      sec
+    </label>
   </div>
 
   <div class="card">
@@ -425,7 +430,7 @@
 <script>
 "use strict";
 
-const SOFTWARE_VERSION = "2026.08.03-v34";
+const SOFTWARE_VERSION = "2026.08.03-v35";
 
 const HR_SERVICE = "0000180d-0000-1000-8000-00805f9b34fb";
 const HR_MEASUREMENT = "00002a37-0000-1000-8000-00805f9b34fb";
@@ -718,7 +723,7 @@ async function registerServiceWorker() {
   }
 
   try {
-    const registration = await navigator.serviceWorker.register("./sw.js?v=2026.08.03-v34", {
+    const registration = await navigator.serviceWorker.register("./sw.js?v=2026.08.03-v35", {
       scope: "./",
       updateViaCache: "none"
     });
@@ -3317,7 +3322,9 @@ async function postAnnotationToBridge(sample, annotation) {
   if (!res.ok) throw new Error("HTTP " + res.status);
 }
 
-const AUTO_SYNC_INTERVAL_MS = 5000;
+const AUTO_SYNC_DEFAULT_MS = 5000;
+const AUTO_SYNC_MIN_MS = 1000; // ondergrens: voorkomt dat een tikfout de lokale server/SQLite plat spamt
+let AUTO_SYNC_INTERVAL_MS = AUTO_SYNC_DEFAULT_MS;
 async function pushInstellingenNaarBridge() {
   if (!bridgeAvailable) return;
   try {
@@ -3358,7 +3365,7 @@ function updateBridgeAutoSyncButton() {
   const btn = document.getElementById("bridgeAutoSyncButton");
   if (!btn) return;
   btn.textContent = bridgeAutoSyncEnabled
-    ? "Auto-verversen: aan (5s)"
+    ? "Auto-verversen: aan"
     : "Auto-verversen: uit";
   btn.className = bridgeAutoSyncEnabled ? "green" : "gray";
 }
@@ -3386,6 +3393,28 @@ function toggleBridgeAutoSync() {
     stopBridgeAutoSync();
   }
 }
+
+// Sync-interval aanpasbaar via het invoerveld naast de toggle-knop.
+// Standaard blijft 5s; de gebruiker kan het korter zetten voor een meer
+// "realtime" gevoel, met een ondergrens van 1s als vangnet.
+const bridgeAutoSyncSecondsInput = document.getElementById("bridgeAutoSyncSeconds");
+function pasBridgeAutoSyncIntervalToe() {
+  if (!bridgeAutoSyncSecondsInput) return;
+  let seconden = parseFloat(bridgeAutoSyncSecondsInput.value);
+  if (!Number.isFinite(seconden) || seconden <= 0) {
+    seconden = AUTO_SYNC_DEFAULT_MS / 1000;
+  }
+  let ms = Math.round(seconden * 1000);
+  if (ms < AUTO_SYNC_MIN_MS) {
+    ms = AUTO_SYNC_MIN_MS;
+    bridgeAutoSyncSecondsInput.value = String(AUTO_SYNC_MIN_MS / 1000);
+  }
+  AUTO_SYNC_INTERVAL_MS = ms;
+  if (bridgeAutoSyncEnabled) {
+    startBridgeAutoSync(); // herstart met nieuw interval
+  }
+}
+bridgeAutoSyncSecondsInput?.addEventListener("change", pasBridgeAutoSyncIntervalToe);
 
 // Bij opstarten stil controleren of de bridge-server bereikbaar is. Als hij
 // bereikbaar is: huidige alarminstellingen meteen doorsturen (zodat de
@@ -3422,6 +3451,6 @@ window.addEventListener("load", () => {
   setTimeout(() => probeerBridgeBijOpstarten(0), BRIDGE_INIT_DELAYS_MS[0]);
 });
 </script>
-<script src="./features.js?v=2026.08.03-v34"></script>
+<script src="./features.js?v=2026.08.03-v35"></script>
 </body>
 </html>
