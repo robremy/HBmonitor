@@ -318,7 +318,7 @@
     <div id="deviceName" class="status"></div>
     <div id="lastDeviceInfo" class="status"></div>
     <div id="wakeLockInfo" class="status">Screen wakelock: niet actief</div>
-    <div id="softwareVersionInfo" class="status">Softwareversie: 2026.08.03-v35</div>
+    <div id="softwareVersionInfo" class="status">Softwareversie: 2026.08.04-v36</div>
     <div id="updateInfo" class="update-line" role="status" aria-live="polite">
       <strong>Nieuwe softwareversie beschikbaar.</strong><br>
       Werk bij wanneer de hartslagmeting veilig onderbroken kan worden.<br>
@@ -329,7 +329,7 @@
     <div id="dbInfo" class="status">Laatste opslag: --</div>
     <div id="storageInfo" class="status">Opslag: controleren...</div>
     <div id="bridgeInfo" class="status">Bridge: niet gecontroleerd</div>
-    <button class="gray" type="button" onclick="syncBridgeIntoToday()">Sync met bridge</button>
+    <button class="gray" type="button" onclick="loadRecentDayCharts()">Sync met bridge</button>
     <button id="bridgeAutoSyncButton" class="green" type="button" onclick="toggleBridgeAutoSync()">Auto-verversen: aan</button>
     <label>
       Sync elke
@@ -430,7 +430,7 @@
 <script>
 "use strict";
 
-const SOFTWARE_VERSION = "2026.08.03-v35";
+const SOFTWARE_VERSION = "2026.08.04-v36";
 
 const HR_SERVICE = "0000180d-0000-1000-8000-00805f9b34fb";
 const HR_MEASUREMENT = "00002a37-0000-1000-8000-00805f9b34fb";
@@ -723,7 +723,7 @@ async function registerServiceWorker() {
   }
 
   try {
-    const registration = await navigator.serviceWorker.register("./sw.js?v=2026.08.03-v35", {
+    const registration = await navigator.serviceWorker.register("./sw.js?v=2026.08.04-v36", {
       scope: "./",
       updateViaCache: "none"
     });
@@ -3451,6 +3451,6 @@ window.addEventListener("load", () => {
   setTimeout(() => probeerBridgeBijOpstarten(0), BRIDGE_INIT_DELAYS_MS[0]);
 });
 </script>
-<script src="./features.js?v=2026.08.03-v35"></script>
+<script src="./features.js?v=2026.08.04-v36"></script>
 </body>
 </html>
