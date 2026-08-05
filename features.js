@@ -1,6 +1,6 @@
 /*
  * Heart Rate Alert gegevensbeheer en historische grafieken
- * Versie: 2026.08.03-v34
+ * Versie: 2026.08.05-v37
  *
  * Functies:
  * - Export van alle opgeslagen dagen naar één CSV-bestand
@@ -11,7 +11,7 @@
 "use strict";
 
 (() => {
-  const FEATURE_VERSION = "2026.08.03-v34";
+  const FEATURE_VERSION = "2026.08.05-v37";
   const CSV_HEADERS = [
     "id",
     "ts_ms",
@@ -238,7 +238,27 @@
     }
   }
 
-  async function loadRecentDayCharts() {
+  window.syncMetBridgeKnop = async function syncMetBridgeKnop() {
+    // "Sync met bridge" moet altijd vandaag + de 3 dagen daarvoor verversen,
+    // ongeacht welke dag toevallig in de "Toon:"-datumkiezer stond
+    // geselecteerd. loadRecentDayCharts() ankert dag 0 op selectedDateKey
+    // (nodig zodat je ook oudere 4-daagse blokken kunt bekijken via de
+    // datumkiezer) — zonder deze reset zou een blijvend-geselecteerde oude
+    // datum de knop laten syncen rond die oude datum i.p.v. vandaag, met als
+    // gevolg een leeg "vandaag"-grafiekje en een live BPM-uitlezing die nooit
+    // bijgewerkt wordt (syncBridgeData werkt de live-uitlezing alleen bij als
+    // dateKey === de daadwerkelijke huidige dag).
+    const todayKey = getDayKey(new Date());
+    selectedDateKey = todayKey;
+    const input = document.getElementById("historyDate");
+    if (input) input.value = todayKey;
+    const returnBtn = document.getElementById("returnTodayButton");
+    if (returnBtn) returnBtn.style.display = "none";
+
+    await loadRecentDayCharts();
+  };
+
+  const loadRecentDayCharts = window.loadRecentDayCharts = async function loadRecentDayCharts() {
     if (recentChartsLoadPromise) {
       return recentChartsLoadPromise;
     }
@@ -249,6 +269,10 @@
       recentDaySamples.clear();
       for (let daysAgo = 0; daysAgo < RECENT_DAY_COUNT; daysAgo += 1) {
         const dateKey = dateKeyDaysAgo(daysAgo);
+        const voortgang = "Synchroniseren dag " + (daysAgo + 1) + "/" + RECENT_DAY_COUNT + " (" + dateKey + ")...";
+        if (typeof setBridgeInfo === "function") {
+          setBridgeInfo(voortgang, "ok");
+        }
 
         // Best-effort backfill: haal bridge-metingen voor DEZE specifieke
         // dag op (niet alleen vandaag) en schrijf ze naar IndexedDB, vóórdat
@@ -285,6 +309,9 @@
       }
       drawChart();
       drawRecentDayCharts();
+      // syncBridgeData() heeft setBridgeInfo al bijgewerkt met het resultaat
+      // van de laatst gesynchroniseerde dag (vandaag); dat blijft staan als
+      // eindstatus in plaats van de voortgangstekst.
     })();
 
     try {
@@ -292,7 +319,7 @@
     } finally {
       recentChartsLoadPromise = null;
     }
-  }
+  };
 
   async function loadSelectedDate() {
     const input = document.getElementById("historyDate");
