@@ -318,7 +318,7 @@
     <div id="deviceName" class="status"></div>
     <div id="lastDeviceInfo" class="status"></div>
     <div id="wakeLockInfo" class="status">Screen wakelock: niet actief</div>
-    <div id="softwareVersionInfo" class="status">Softwareversie: 2026.08.05-v37</div>
+    <div id="softwareVersionInfo" class="status">Softwareversie: 2026.08.05-v39</div>
     <div id="updateInfo" class="update-line" role="status" aria-live="polite">
       <strong>Nieuwe softwareversie beschikbaar.</strong><br>
       Werk bij wanneer de hartslagmeting veilig onderbroken kan worden.<br>
@@ -329,6 +329,13 @@
     <div id="dbInfo" class="status">Laatste opslag: --</div>
     <div id="storageInfo" class="status">Opslag: controleren...</div>
     <div id="bridgeInfo" class="status">Bridge: niet gecontroleerd</div>
+    <div id="bridgeOwnIp" class="status"></div>
+    <label>
+      Bridge-adres
+      <input id="bridgeAddressInput" type="text" placeholder="127.0.0.1:8787" style="width:12em;" />
+    </label>
+    <button class="gray" type="button" onclick="slaBridgeAdresOp()">Bridge-adres opslaan</button>
+    <button class="gray" type="button" onclick="herstelBridgeAdres()">Herstel naar 127.0.0.1</button>
     <button class="gray" type="button" onclick="syncMetBridgeKnop()">Sync met bridge</button>
     <button id="bridgeAutoSyncButton" class="green" type="button" onclick="toggleBridgeAutoSync()">Auto-verversen: aan</button>
     <label>
@@ -430,7 +437,7 @@
 <script>
 "use strict";
 
-const SOFTWARE_VERSION = "2026.08.05-v37";
+const SOFTWARE_VERSION = "2026.08.05-v39";
 
 const HR_SERVICE = "0000180d-0000-1000-8000-00805f9b34fb";
 const HR_MEASUREMENT = "00002a37-0000-1000-8000-00805f9b34fb";
@@ -723,7 +730,7 @@ async function registerServiceWorker() {
   }
 
   try {
-    const registration = await navigator.serviceWorker.register("./sw.js?v=2026.08.05-v37", {
+    const registration = await navigator.serviceWorker.register("./sw.js?v=2026.08.05-v39", {
       scope: "./",
       updateViaCache: "none"
     });
@@ -3102,7 +3109,66 @@ window.addEventListener("load", async () => {
 // het was via IndexedDB.
 // ============================================================
 
-const BRIDGE_URL = "http://127.0.0.1:8787";
+// Bridge-adres is configureerbaar (localStorage), zodat de PWA op een
+// TWEEDE telefoon naar de brug op de EERSTE telefoon kan wijzen via het
+// LAN-IP-adres in plaats van 127.0.0.1. Standaard blijft 127.0.0.1:8787
+// (zelfde-toestel-gebruik) tenzij de gebruiker iets anders invult en
+// opslaat. hr_sync_server.py moet dan wel op 0.0.0.0 luisteren i.p.v.
+// alleen 127.0.0.1, en CORS-headers meesturen, anders wordt een
+// cross-device fetch geweigerd door de browser.
+const BRIDGE_ADDRESS_STORAGE_KEY = "hbmonitor_bridge_address";
+function leesBridgeAdres() {
+  try {
+    return localStorage.getItem(BRIDGE_ADDRESS_STORAGE_KEY) || "127.0.0.1:8787";
+  } catch (error) {
+    return "127.0.0.1:8787";
+  }
+}
+function bouwBridgeUrl(adres) {
+  // Sta zowel "192.168.1.42" als "192.168.1.42:8787" als "http://192.168.1.42:8787" toe.
+  let a = (adres || "").trim();
+  if (!a) a = "127.0.0.1:8787";
+  if (!/^https?:\/\//i.test(a)) a = "http://" + a;
+  if (!/:\d+$/.test(a)) a = a + ":8787";
+  return a;
+}
+let BRIDGE_URL = bouwBridgeUrl(leesBridgeAdres());
+
+function slaBridgeAdresOp() {
+  const input = document.getElementById("bridgeAddressInput");
+  const waarde = input ? input.value.trim() : "";
+  const opgeslagen = waarde || "127.0.0.1:8787";
+  try {
+    localStorage.setItem(BRIDGE_ADDRESS_STORAGE_KEY, opgeslagen);
+  } catch (error) {
+    log("Bridge-adres opslaan mislukt (localStorage): " + error);
+  }
+  BRIDGE_URL = bouwBridgeUrl(opgeslagen);
+  if (input) input.value = opgeslagen;
+  log("Bridge-adres ingesteld op: " + BRIDGE_URL);
+  setBridgeInfo("Bridge: niet gecontroleerd", "");
+  checkBridgeAvailable();
+}
+
+function herstelBridgeAdres() {
+  const standaard = "127.0.0.1:8787";
+  const input = document.getElementById("bridgeAddressInput");
+  if (input) input.value = standaard;
+  try {
+    localStorage.setItem(BRIDGE_ADDRESS_STORAGE_KEY, standaard);
+  } catch (error) {
+    log("Bridge-adres herstellen mislukt (localStorage): " + error);
+  }
+  BRIDGE_URL = bouwBridgeUrl(standaard);
+  log("Bridge-adres teruggezet naar: " + BRIDGE_URL);
+  setBridgeInfo("Bridge: niet gecontroleerd", "");
+  checkBridgeAvailable();
+}
+
+window.addEventListener("DOMContentLoaded", () => {
+  const input = document.getElementById("bridgeAddressInput");
+  if (input) input.value = leesBridgeAdres();
+});
 let bridgeAvailable = false;
 let bridgeAutoSyncTimer = null;
 
@@ -3133,9 +3199,24 @@ function bridgeTsToMs(ts) {
 }
 
 async function checkBridgeAvailable() {
+  let ownIp = null;
   try {
     const res = await fetch(BRIDGE_URL + "/api/health", { cache: "no-store" });
     bridgeAvailable = res.ok;
+    if (res.ok) {
+      // Optioneel veld: als hr_sync_server.py "ip" meestuurt in de
+      // /api/health-respons (het eigen LAN-IP van de brugtelefoon), tonen we
+      // dat hier zodat je het kunt aflezen om op een TWEEDE telefoon in te
+      // vullen bij "Bridge-adres". Oudere hr_sync_server.py-versies zonder
+      // dit veld werken gewoon door — dan blijft dit veld leeg.
+      try {
+        const data = await res.json();
+        if (data && data.ip) ownIp = data.ip;
+      } catch (parseError) {
+        // health-endpoint gaf geen (geldige) JSON terug — geen probleem,
+        // bereikbaarheid staat al vast via res.ok.
+      }
+    }
   } catch (error) {
     bridgeAvailable = false;
   }
@@ -3143,6 +3224,10 @@ async function checkBridgeAvailable() {
     setBridgeInfo("Bridge: bereikbaar", "ok");
   } else {
     setBridgeInfo("Bridge: niet bereikbaar", "bad");
+  }
+  const ownIpEl = document.getElementById("bridgeOwnIp");
+  if (ownIpEl) {
+    ownIpEl.textContent = ownIp ? "Bridge-IP (voor tweede telefoon): " + ownIp + ":8787" : "";
   }
   return bridgeAvailable;
 }
@@ -3451,6 +3536,6 @@ window.addEventListener("load", () => {
   setTimeout(() => probeerBridgeBijOpstarten(0), BRIDGE_INIT_DELAYS_MS[0]);
 });
 </script>
-<script src="./features.js?v=2026.08.05-v37"></script>
+<script src="./features.js?v=2026.08.05-v39"></script>
 </body>
 </html>
