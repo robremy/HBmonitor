@@ -2,16 +2,23 @@
 
 ## Screenshots
 
-<p align="left">
+<p align="center">
   <img src="screenshot-bediening.jpg" alt="Controls: bridge settings, connect, alarm and thresholds" width="260">
-</p>
-<p align="left">
   <img src="screenshot-overzicht.jpg" alt="Overview: data, log and current heart rate" width="260">
-<p align="left">
-  <img src="screenshot-geschiedenis.jpg" alt="Heart rate charts for previous days" width="260">
-</p>
-<p align="left">
   <img src="screenshot-grafiek-zoom.jpg" alt="Zoomed heart rate chart with annotations and peak detection" width="260">
+</p>
+<p align="center">
+  <img src="screenshot-geschiedenis.jpg" alt="Heart rate charts for previous days" width="260">
+  <img src="screenshot-log.jpg" alt="Log of measurements and storage status" width="260">
+  <img src="screenshot-info-toevoegen.jpg" alt="Adding info to a measurement point" width="260">
+</p>
+<p align="center">
+  <img src="screenshot-annotatie-opties.jpg" alt="Managing annotation options" width="260">
+  <img src="screenshot-gegevens.jpg" alt="Exporting/importing data" width="260">
+  <img src="screenshot-widget.jpg" alt="Heart Rate Alert widget info" width="260">
+</p>
+<p align="center">
+  <img src="screenshot-bluetooth-koppelen.jpg" alt="Pairing Bluetooth with the Xiaomi Smart Band 10" width="260">
 </p>
 
 Heart Rate Alert works offline in Chrome:
