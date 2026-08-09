@@ -3,18 +3,21 @@
 ## Screenshots
 
 <p align="center">
-  <img src="screenshot-overzicht.jpg" alt="Overzicht: actuele hartslag en dagoverzicht" width="260">
-  <img src="screenshot-grafiek-zoom.jpg" alt="Ingezoomde hartslaggrafiek met piekherkenning" width="260">
-  <img src="screenshot-bediening.jpg" alt="Bediening: verbinden, alarm en grenzen" width="260">
+  <img src="screenshot-bediening.jpg" alt="Bediening: bridge-instellingen, verbinden, alarm en grenzen" width="260">
+  <img src="screenshot-overzicht.jpg" alt="Overzicht: gegevens, log en actuele hartslag" width="260">
+  <img src="screenshot-grafiek-zoom.jpg" alt="Ingezoomde hartslaggrafiek met annotaties en piekherkenning" width="260">
 </p>
 <p align="center">
+  <img src="screenshot-geschiedenis.jpg" alt="Hartslaggrafieken van voorgaande dagen" width="260">
   <img src="screenshot-log.jpg" alt="Log van metingen en opslagstatus" width="260">
   <img src="screenshot-info-toevoegen.jpg" alt="Info toevoegen aan een meetpunt" width="260">
-  <img src="screenshot-annotatie-opties.jpg" alt="Annotatie-opties beheren" width="260">
 </p>
 <p align="center">
+  <img src="screenshot-annotatie-opties.jpg" alt="Annotatie-opties beheren" width="260">
   <img src="screenshot-gegevens.jpg" alt="Gegevens exporteren/importeren" width="260">
   <img src="screenshot-widget.jpg" alt="Heart Rate Alert widget-info" width="260">
+</p>
+<p align="center">
   <img src="screenshot-bluetooth-koppelen.jpg" alt="Bluetooth koppelen met de Xiaomi Smart Band 10" width="260">
 </p>
 
@@ -40,6 +43,14 @@ Settings → Share HR → On
 
 Alle hartslagmetingen blijven lokaal in Chrome IndexedDB op het apparaat.
 Gebruik "Download CSV vandaag" om data te exporteren.
+
+## Versie 2026.08.05-v39
+
+- Bridge-adres is nu configureerbaar via een invoerveld (`bridgeAddressInput`), opgeslagen in localStorage (`hbmonitor_bridge_address`). Hiermee kan de PWA op een TWEEDE telefoon naar de brug op de EERSTE telefoon wijzen via het LAN-IP-adres in plaats van alleen `127.0.0.1:8787`. `checkBridgeAvailable()` toont daarbij, als `hr_sync_server.py` dit meestuurt in de `/api/health`-respons, het eigen LAN-IP van de brugtelefoon (`bridgeOwnIp`) zodat dat adres eenvoudig op het tweede toestel kan worden overgenomen. Een knop zet het adres terug naar de standaardwaarde.
+- De eerste bridge-bereikbaarheidscheck bij het laden van de pagina herhaalt nu met oplopende vertraging (1,5s / 3s / 5s / 8s / 13s) in plaats van eenmalig te proberen. Direct na een pull-to-refresh is `127.0.0.1:8787` soms nog even niet bereikbaar terwijl Termux/het netwerk nog opstart; zonder retry bleef de pagina dan permanent "Bridge: niet bereikbaar" tonen totdat er handmatig op "Sync met bridge" werd getikt.
+- Nieuwe `syncMetBridgeKnop()`-wrapper achter de knop "Sync met bridge": deze zet `selectedDateKey` altijd expliciet terug op vandaag (en verbergt de "terug naar vandaag"-knop) vóórdat `loadRecentDayCharts()` wordt aangeroepen. Voorheen kon een nog-geselecteerde oudere datum in de datumkiezer ervoor zorgen dat de syncknop rond die oude dag synchroniseerde in plaats van vandaag, met een leeg "vandaag"-grafiekje en een live BPM-uitlezing die nooit bijwerkte tot gevolg.
+- Herstelbrackets (`findRecoveryBrackets`) slaan nu pieken over die vallen binnen een instelvenster van 2 minuten na een reconnect van ≥3 minuten (`isWithinReconnectSettleWindow`). Dit voorkomt dat een sensor-inschakeleffect na een langere verbindingsonderbreking wordt aangezien voor een echte hartslagpiek met bijbehorend hersteltraject.
+- Annotaties op een meting die via de bridge is binnengekomen (`sample.source === "bridge"`) worden nu naar de bridge-database geschreven (`postAnnotationToBridge`) in plaats van naar IndexedDB, zodat de Android-bridge en de PWA dezelfde annotatie zien ongeacht welke kant hem heeft toegevoegd.
 
 ## Versie 2026.08.02-v32
 
