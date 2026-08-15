@@ -49,6 +49,10 @@ Heartbeat data from the Xiaomi Smart Band 10 can now be read by another Android 
   - **`hr_tail.py`** — Python script that reads the JSONL file into a SQLite database
   - **`hr_sync_server.py`** — Python script that syncs SQLite to the PWA's IndexedDB
 
+## Version 2026.08.15-v41
+
+- Fixed the chart/live-reading appearing to "lag" by tens of minutes in bridge mode after the screen was locked for a while. Chrome throttles `setInterval` timers in a backgrounded/inactive tab, so `bridgeAutoSyncTimer` (normally every few seconds) could go a long time without ticking. There was already a `visibilitychange` handler that force-reconnects direct Bluetooth on return to foreground, but no equivalent for bridge mode — the throttled sync timer just had to tick on its own eventually. Added a second `visibilitychange` listener that calls `syncBridgeIntoToday()` immediately when the tab becomes visible again, regardless of the timer's state.
+
 ## Version 2026.08.15-v40
 
 - Fixed a startup freeze/crash ("Aw, Snap!") on cold page loads. `syncBridgeData()` previously wrote each new bridge measurement to IndexedDB in its own separately awaited transaction (`saveSampleIndexedDb()`). On a normal day (10,000+ measurements), a cold load — with the in-memory `bridgeLaatstVerwerkteTs` watermark reset to empty — treated the entire day as "new" and queued thousands of sequential awaited transactions per day across the 4-day `loadRecentDayCharts()` window, freezing the tab and eventually crashing the renderer.

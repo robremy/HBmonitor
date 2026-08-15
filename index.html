@@ -318,7 +318,7 @@
     <div id="deviceName" class="status"></div>
     <div id="lastDeviceInfo" class="status"></div>
     <div id="wakeLockInfo" class="status">Screen wakelock: niet actief</div>
-    <div id="softwareVersionInfo" class="status">Softwareversie: 2026.08.15-v40</div>
+    <div id="softwareVersionInfo" class="status">Softwareversie: 2026.08.15-v41</div>
     <div id="updateInfo" class="update-line" role="status" aria-live="polite">
       <strong>Nieuwe softwareversie beschikbaar.</strong><br>
       Werk bij wanneer de hartslagmeting veilig onderbroken kan worden.<br>
@@ -437,7 +437,7 @@
 <script>
 "use strict";
 
-const SOFTWARE_VERSION = "2026.08.15-v40";
+const SOFTWARE_VERSION = "2026.08.15-v41";
 
 const HR_SERVICE = "0000180d-0000-1000-8000-00805f9b34fb";
 const HR_MEASUREMENT = "00002a37-0000-1000-8000-00805f9b34fb";
@@ -730,7 +730,7 @@ async function registerServiceWorker() {
   }
 
   try {
-    const registration = await navigator.serviceWorker.register("./sw.js?v=2026.08.15-v40", {
+    const registration = await navigator.serviceWorker.register("./sw.js?v=2026.08.15-v41", {
       scope: "./",
       updateViaCache: "none"
     });
@@ -1661,6 +1661,26 @@ document.addEventListener("visibilitychange", async () => {
     log("App weer actief; Bluetooth-verbinding geforceerd herstellen");
     cancelReconnect();
     await reconnectBand(true);
+  }
+});
+
+// Zelfde probleem als hierboven voor directe BLE, maar dan voor
+// bridge-modus: de bridgeAutoSyncTimer (setInterval elke paar sec) wordt
+// door Chrome afgeknepen zodra het scherm uit gaat / het tabblad naar de
+// achtergrond gaat. Zonder deze listener bleef de grafiek na het weer
+// aanzetten van het scherm gewoon staan op het laatste punt van vóór het
+// vergrendelen totdat de afgeknepen timer toevallig weer een keer tikte —
+// soms pas na tientallen minuten. Nu forceren we bij het weer zichtbaar
+// worden van het tabblad direct een sync, ongeacht de timer-status.
+document.addEventListener("visibilitychange", () => {
+  if (document.visibilityState !== "visible") {
+    return;
+  }
+  if (typeof bridgeAvailable !== "undefined" && bridgeAvailable && typeof syncBridgeIntoToday === "function") {
+    log("App weer actief; bridge-sync geforceerd bijwerken");
+    syncBridgeIntoToday().catch(error => {
+      log("Bridge-sync bij terugkeer mislukt: " + error);
+    });
   }
 });
 
@@ -3613,6 +3633,6 @@ window.addEventListener("load", () => {
   setTimeout(() => probeerBridgeBijOpstarten(0), BRIDGE_INIT_DELAYS_MS[0]);
 });
 </script>
-<script src="./features.js?v=2026.08.15-v40"></script>
+<script src="./features.js?v=2026.08.15-v41"></script>
 </body>
 </html>
