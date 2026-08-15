@@ -49,6 +49,12 @@ Heartbeat data from the Xiaomi Smart Band 10 can now be read by another Android 
   - **`hr_tail.py`** — Python script that reads the JSONL file into a SQLite database
   - **`hr_sync_server.py`** — Python script that syncs SQLite to the PWA's IndexedDB
 
+## Version 2026.08.15-v40
+
+- Fixed a startup freeze/crash ("Aw, Snap!") on cold page loads. `syncBridgeData()` previously wrote each new bridge measurement to IndexedDB in its own separately awaited transaction (`saveSampleIndexedDb()`). On a normal day (10,000+ measurements), a cold load — with the in-memory `bridgeLaatstVerwerkteTs` watermark reset to empty — treated the entire day as "new" and queued thousands of sequential awaited transactions per day across the 4-day `loadRecentDayCharts()` window, freezing the tab and eventually crashing the renderer.
+- Added `saveSamplesIndexedDb()`, a batched variant that writes an entire list of new measurements in a single IndexedDB transaction instead of one transaction per row.
+- `bridgeLaatstVerwerkteTs` (the per-day "already synced up to here" watermark) is now persisted to `localStorage` (`hbmonitor_bridge_watermark`) instead of living only in a JS variable. A full close/reopen of the PWA no longer re-processes an entire day of already-synced data — only genuinely new measurements since the last sync are written.
+
 ## Version 2026.08.05-v39
 
 - The bridge address is now configurable via an input field (`bridgeAddressInput`), stored in localStorage (`hbmonitor_bridge_address`). This lets the PWA on a SECOND phone point to the bridge on the FIRST phone via its LAN IP address instead of only `127.0.0.1:8787`. `checkBridgeAvailable()` also displays the bridge phone's own LAN IP (`bridgeOwnIp`) when `hr_sync_server.py` includes it in the `/api/health` response, so that address can easily be copied onto the second device. A button resets the address back to the default.

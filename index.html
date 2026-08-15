@@ -318,7 +318,7 @@
     <div id="deviceName" class="status"></div>
     <div id="lastDeviceInfo" class="status"></div>
     <div id="wakeLockInfo" class="status">Screen wakelock: niet actief</div>
-    <div id="softwareVersionInfo" class="status">Softwareversie: 2026.08.05-v39</div>
+    <div id="softwareVersionInfo" class="status">Softwareversie: 2026.08.15-v40</div>
     <div id="updateInfo" class="update-line" role="status" aria-live="polite">
       <strong>Nieuwe softwareversie beschikbaar.</strong><br>
       Werk bij wanneer de hartslagmeting veilig onderbroken kan worden.<br>
@@ -437,7 +437,7 @@
 <script>
 "use strict";
 
-const SOFTWARE_VERSION = "2026.08.05-v39";
+const SOFTWARE_VERSION = "2026.08.15-v40";
 
 const HR_SERVICE = "0000180d-0000-1000-8000-00805f9b34fb";
 const HR_MEASUREMENT = "00002a37-0000-1000-8000-00805f9b34fb";
@@ -730,7 +730,7 @@ async function registerServiceWorker() {
   }
 
   try {
-    const registration = await navigator.serviceWorker.register("./sw.js?v=2026.08.05-v39", {
+    const registration = await navigator.serviceWorker.register("./sw.js?v=2026.08.15-v40", {
       scope: "./",
       updateViaCache: "none"
     });
@@ -912,6 +912,37 @@ function saveSampleIndexedDb(sample) {
     const transaction = db.transaction(STORE_NAME, "readwrite");
     transaction.objectStore(STORE_NAME).put(sample);
     transaction.oncomplete = () => resolve(true);
+    transaction.onerror = event => reject(event.target.error);
+  });
+}
+
+// Batched variant: schrijft een hele lijst metingen weg in ÉÉN transactie
+// i.p.v. één transactie per meting. Bij een "koude" bridge-sync (bv. na
+// een volledige herstart van de pagina, wanneer bridgeLaatstVerwerkteTs nog
+// leeg is) kan dit om duizenden metingen per dag gaan; duizenden apart
+// awaited transacties bleek de renderer te bevriezen en uiteindelijk te
+// laten crashen (OOM). Alle put()-calls binnen dezelfde transactie plaatsen
+// is honderden keren sneller en blokkeert de hoofdthread niet merkbaar.
+function saveSamplesIndexedDb(samples) {
+  return new Promise((resolve, reject) => {
+    if (!db) {
+      reject(new Error("IndexedDB is nog niet open"));
+      return;
+    }
+
+    if (!samples || samples.length === 0) {
+      resolve(0);
+      return;
+    }
+
+    const transaction = db.transaction(STORE_NAME, "readwrite");
+    const store = transaction.objectStore(STORE_NAME);
+
+    for (const sample of samples) {
+      store.put(sample);
+    }
+
+    transaction.oncomplete = () => resolve(samples.length);
     transaction.onerror = event => reject(event.target.error);
   });
 }
@@ -3277,7 +3308,34 @@ async function fetchBridgeAnnotaties(dateKey) {
 // metingen per dag wordt dat te zwaar. fetchBridgeMetingen() haalt zelf nog
 // steeds de hele dag op (de bridge-server ondersteunt geen "sinds"-filter),
 // maar we slaan alleen het nieuwe stuk daadwerkelijk op.
-const bridgeLaatstVerwerkteTs = {};
+// Onthoudt de watermark PER DAG in localStorage, niet alleen in-memory.
+// Zonder dit werd bij elke pagina-herlaad (na volledig sluiten/heropenen
+// van de PWA, niet alleen achtergrond) de hele dag als "nog niet
+// gesynchroniseerd" behandeld, ook al stond alles al in IndexedDB. Bij een
+// normale dag van 10.000+ metingen betekende dat een "koude" catch-up van
+// duizenden metingen ineens bij het opstarten — de oorzaak van de
+// bevriezing/crash bij opstarten (zie ook saveSamplesIndexedDb hierboven).
+const BRIDGE_WATERMARK_STORAGE_KEY = "hbmonitor_bridge_watermark";
+
+function laadBridgeWatermarks() {
+  try {
+    const raw = localStorage.getItem(BRIDGE_WATERMARK_STORAGE_KEY);
+    return raw ? JSON.parse(raw) : {};
+  } catch (error) {
+    log("Bridge-watermark laden mislukt: " + error);
+    return {};
+  }
+}
+
+function bewaarBridgeWatermarks() {
+  try {
+    localStorage.setItem(BRIDGE_WATERMARK_STORAGE_KEY, JSON.stringify(bridgeLaatstVerwerkteTs));
+  } catch (error) {
+    log("Bridge-watermark opslaan mislukt: " + error);
+  }
+}
+
+const bridgeLaatstVerwerkteTs = laadBridgeWatermarks();
 
 async function syncBridgeData(dateKey) {
   const ok = await checkBridgeAvailable();
@@ -3326,14 +3384,13 @@ async function syncBridgeData(dateKey) {
     // alle IndexedDB-writes na de allereerste sync blokkeert.
     const nieuweBridgeSamples = bridgeSamples.filter(s => s.ts_ms > laatsteTs);
 
-    // Permanent opslaan. put() dedupliceert vanzelf op id ("bridge_"+ts),
-    // dus herhaald syncen van dezelfde dag stapelt niets op.
-    for (const sample of nieuweBridgeSamples) {
-      try {
-        await saveSampleIndexedDb(sample);
-      } catch (error) {
-        log("Bridge-meting opslaan in IndexedDB mislukt: " + error);
-      }
+    // Permanent opslaan, in ÉÉN transactie voor de hele batch. put()
+    // dedupliceert vanzelf op id ("bridge_"+ts), dus herhaald syncen van
+    // dezelfde dag stapelt niets op.
+    try {
+      await saveSamplesIndexedDb(nieuweBridgeSamples);
+    } catch (error) {
+      log("Bridge-metingen opslaan in IndexedDB mislukt: " + error);
     }
 
     // Alleen voor vandaag ook direct het in-memory array bijwerken, zodat de
@@ -3394,6 +3451,7 @@ async function syncBridgeData(dateKey) {
     if (bridgeSamples.length > 0) {
       const maxTs = bridgeSamples.reduce((max, s) => Math.max(max, s.ts_ms), laatsteTs);
       bridgeLaatstVerwerkteTs[dateKey] = maxTs;
+      bewaarBridgeWatermarks();
     }
 
     setBridgeInfo(
@@ -3555,6 +3613,6 @@ window.addEventListener("load", () => {
   setTimeout(() => probeerBridgeBijOpstarten(0), BRIDGE_INIT_DELAYS_MS[0]);
 });
 </script>
-<script src="./features.js?v=2026.08.05-v39"></script>
+<script src="./features.js?v=2026.08.15-v40"></script>
 </body>
 </html>
