@@ -1248,6 +1248,12 @@ function toggleAlarmMode() {
     button.textContent = "Alarm: audio";
     button.className = "red";
     log("Alarmmodus gewijzigd naar audio");
+    // AudioContext meteen aanmaken/resumen binnen deze klik (user-gesture).
+    // Zonder dit blokkeert de browser de context omdat hij anders pas
+    // wordt aangemaakt op het moment dat checkAlarm() het alarm automatisch
+    // triggert (dus buiten een user-gesture om) — dan blijft de context
+    // "suspended" en is er geen geluid, zonder dat er een fout verschijnt.
+    unlockAudio();
   } else {
     alarmMode = "vibrate";
     button.textContent = "Alarm: tril";
@@ -1834,6 +1840,19 @@ function stopVibration() {
 
 function sleep(milliseconds) {
   return new Promise(resolve => setTimeout(resolve, milliseconds));
+}
+
+function unlockAudio() {
+  try {
+    if (!audioCtx) {
+      audioCtx = new (window.AudioContext || window.webkitAudioContext)();
+    }
+    if (audioCtx.state === "suspended") {
+      audioCtx.resume();
+    }
+  } catch (error) {
+    log("Audio unlock lukte niet: " + error);
+  }
 }
 
 async function beepOnce(durationMs = 450, frequency = 950) {
