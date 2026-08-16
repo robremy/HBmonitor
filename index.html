@@ -318,7 +318,7 @@
     <div id="deviceName" class="status"></div>
     <div id="lastDeviceInfo" class="status"></div>
     <div id="wakeLockInfo" class="status">Screen wakelock: niet actief</div>
-    <div id="softwareVersionInfo" class="status">Softwareversie: 2026.08.15-v41</div>
+    <div id="softwareVersionInfo" class="status">Softwareversie: 2026.08.16-v42</div>
     <div id="updateInfo" class="update-line" role="status" aria-live="polite">
       <strong>Nieuwe softwareversie beschikbaar.</strong><br>
       Werk bij wanneer de hartslagmeting veilig onderbroken kan worden.<br>
@@ -437,7 +437,7 @@
 <script>
 "use strict";
 
-const SOFTWARE_VERSION = "2026.08.15-v41";
+const SOFTWARE_VERSION = "2026.08.16-v42";
 
 const HR_SERVICE = "0000180d-0000-1000-8000-00805f9b34fb";
 const HR_MEASUREMENT = "00002a37-0000-1000-8000-00805f9b34fb";
@@ -730,7 +730,7 @@ async function registerServiceWorker() {
   }
 
   try {
-    const registration = await navigator.serviceWorker.register("./sw.js?v=2026.08.15-v41", {
+    const registration = await navigator.serviceWorker.register("./sw.js?v=2026.08.16-v42", {
       scope: "./",
       updateViaCache: "none"
     });
@@ -1678,8 +1678,20 @@ document.addEventListener("visibilitychange", () => {
   }
   if (typeof bridgeAvailable !== "undefined" && bridgeAvailable && typeof syncBridgeIntoToday === "function") {
     log("App weer actief; bridge-sync geforceerd bijwerken");
-    syncBridgeIntoToday().catch(error => {
-      log("Bridge-sync bij terugkeer mislukt: " + error);
+    // Direct na het weer zichtbaar worden faalt fetch() hier soms een keer
+    // met "Failed to fetch", ook richting 127.0.0.1 op hetzelfde toestel:
+    // Chrome kan een tabblad dat op de achtergrond stond een pooled
+    // TCP-verbinding laten hergebruiken die inmiddels (door het OS, tijdens
+    // het gepauzeerd zijn) al is afgebroken. De eerstvolgende fetch() op
+    // diezelfde origin bouwt daarna gewoon een verse verbinding op. Eén
+    // stille retry na een korte pauze voorkomt dat deze onschuldige,
+    // zelf-herstellende hik als harde fout in de Log verschijnt.
+    syncBridgeIntoToday().catch(() => {
+      setTimeout(() => {
+        syncBridgeIntoToday().catch(error => {
+          log("Bridge-sync bij terugkeer mislukt: " + error);
+        });
+      }, 1200);
     });
   }
 });
@@ -3633,6 +3645,6 @@ window.addEventListener("load", () => {
   setTimeout(() => probeerBridgeBijOpstarten(0), BRIDGE_INIT_DELAYS_MS[0]);
 });
 </script>
-<script src="./features.js?v=2026.08.15-v41"></script>
+<script src="./features.js?v=2026.08.16-v42"></script>
 </body>
 </html>
