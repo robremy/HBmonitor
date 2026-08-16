@@ -1,6 +1,6 @@
 /*
  * Heart Rate Alert gegevensbeheer en historische grafieken
- * Versie: 2026.08.16-v42
+ * Versie: 2026.08.16-v43
  *
  * Functies:
  * - Export van alle opgeslagen dagen naar één CSV-bestand
@@ -11,7 +11,7 @@
 "use strict";
 
 (() => {
-  const FEATURE_VERSION = "2026.08.16-v42";
+  const FEATURE_VERSION = "2026.08.16-v43";
   const CSV_HEADERS = [
     "id",
     "ts_ms",

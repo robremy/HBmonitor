@@ -318,7 +318,7 @@
     <div id="deviceName" class="status"></div>
     <div id="lastDeviceInfo" class="status"></div>
     <div id="wakeLockInfo" class="status">Screen wakelock: niet actief</div>
-    <div id="softwareVersionInfo" class="status">Softwareversie: 2026.08.16-v42</div>
+    <div id="softwareVersionInfo" class="status">Softwareversie: 2026.08.16-v43</div>
     <div id="updateInfo" class="update-line" role="status" aria-live="polite">
       <strong>Nieuwe softwareversie beschikbaar.</strong><br>
       Werk bij wanneer de hartslagmeting veilig onderbroken kan worden.<br>
@@ -437,7 +437,7 @@
 <script>
 "use strict";
 
-const SOFTWARE_VERSION = "2026.08.16-v42";
+const SOFTWARE_VERSION = "2026.08.16-v43";
 
 const HR_SERVICE = "0000180d-0000-1000-8000-00805f9b34fb";
 const HR_MEASUREMENT = "00002a37-0000-1000-8000-00805f9b34fb";
@@ -730,7 +730,7 @@ async function registerServiceWorker() {
   }
 
   try {
-    const registration = await navigator.serviceWorker.register("./sw.js?v=2026.08.16-v42", {
+    const registration = await navigator.serviceWorker.register("./sw.js?v=2026.08.16-v43", {
       scope: "./",
       updateViaCache: "none"
     });
@@ -3314,8 +3314,12 @@ async function checkBridgeAvailable() {
   return bridgeAvailable;
 }
 
-async function fetchBridgeMetingen(dateKey) {
-  const res = await fetch(BRIDGE_URL + "/api/metingen?date=" + encodeURIComponent(dateKey), { cache: "no-store" });
+async function fetchBridgeMetingen(dateKey, sinds) {
+  let url = BRIDGE_URL + "/api/metingen?date=" + encodeURIComponent(dateKey);
+  if (sinds) {
+    url += "&since=" + encodeURIComponent(sinds);
+  }
+  const res = await fetch(url, { cache: "no-store" });
   if (!res.ok) throw new Error("HTTP " + res.status);
   return res.json();
 }
@@ -3373,9 +3377,17 @@ async function syncBridgeData(dateKey) {
   const ok = await checkBridgeAvailable();
   if (!ok) return false;
 
+  // Watermark van de vorige sync-cyclus voor deze dag: gebruiken we nu
+  // OOK om de server maar het nieuwe stuk te laten terugsturen (since=),
+  // in plaats van hem alleen achteraf te gebruiken om de volledige
+  // dag-respons client-side te filteren (zie nieuweBridgeSamples
+  // hieronder, die als extra veiligheidsnet blijft staan).
+  const laatsteTs = bridgeLaatstVerwerkteTs[dateKey] || 0;
+  const sindsParam = laatsteTs > 0 ? bridgeIsoString(laatsteTs) : undefined;
+
   try {
     const [metingen, annotaties] = await Promise.all([
-      fetchBridgeMetingen(dateKey),
+      fetchBridgeMetingen(dateKey, sindsParam),
       fetchBridgeAnnotaties(dateKey)
     ]);
 
@@ -3404,10 +3416,13 @@ async function syncBridgeData(dateKey) {
     });
 
     // Alleen metingen die nog niet eerder deze sessie zijn weggeschreven.
+    // Sinds de server nu al op "since" filtert, is metingen hier meestal
+    // al precies het nieuwe stuk — dit filter blijft als veiligheidsnet
+    // staan (bv. een bridge-server van vóór deze wijziging die "since"
+    // negeert en gewoon de hele dag teruggeeft).
     // Kanttekening: een annotatie die achteraf op een al-gesynchroniseerde
     // (oudere) meting wordt gezet, komt hierdoor pas bij de volgende
     // volledige herlaad (paginaherlaad) door — niet binnen dezelfde sessie.
-    const laatsteTs = bridgeLaatstVerwerkteTs[dateKey] || 0;
     // Let op: bridge_ts is een ISO-datumtijd-STRING (komt overeen met
     // Android's "ts TEXT PRIMARY KEY"-kolom), geen getal. Vergelijken met
     // ts_ms (al omgezet naar numerieke epoch-milliseconden) i.p.v. bridge_ts
@@ -3442,18 +3457,28 @@ async function syncBridgeData(dateKey) {
         bridge_ts: s.bridge_ts
       }));
 
-      // Eigen (rechtstreekse Web Bluetooth) metingen blijven staan; alleen de
-      // bridge-metingen worden bij elke sync ververst, zodat herhaald syncen
-      // geen duplicaten opstapelt. Op seconde-niveau dedupliceren voorkomt dat
-      // hetzelfde moment twee keer getekend wordt als beide bronnen actief
-      // waren.
+      // Eigen (rechtstreekse Web Bluetooth) metingen blijven staan. Bridge-
+      // metingen die al in todaySamples stonden blijven NU OOK staan i.p.v.
+      // vervangen te worden: sinds fetchBridgeMetingen() met "since=" alleen
+      // nog het NIEUWE stuk van de dag teruggeeft (zie syncBridgeData
+      // hierboven), zou een simpele "vervang alle bridge-samples door het
+      // fetch-resultaat" hier bij elke cyclus de al eerder getekende
+      // bridge-punten van eerder op de dag uit de grafiek laten vallen.
+      // In plaats daarvan: bestaande bridge-samples behouden, en het
+      // nieuwe stuk (op id gededupliceerd t.o.v. wat al aanwezig is)
+      // erbovenop toevoegen.
       const eigenSamples = todaySamples.filter(sample => sample.source !== "bridge");
+      const bestaandeBridgeSamples = todaySamples.filter(sample => sample.source === "bridge");
       const eigenTijden = new Set(eigenSamples.map(sample => Math.floor(sample.time / 1000)));
-      const aanvullendeBridgeSamples = mappedBridgeSamples.filter(
-        sample => !eigenTijden.has(Math.floor(sample.time / 1000))
+      const bestaandeBridgeIds = new Set(bestaandeBridgeSamples.map(sample => sample.id));
+      const nieuweMappedBridgeSamples = mappedBridgeSamples.filter(
+        sample => !bestaandeBridgeIds.has(sample.id) && !eigenTijden.has(Math.floor(sample.time / 1000))
       );
 
-      todaySamples = eigenSamples.concat(aanvullendeBridgeSamples).sort((a, b) => a.time - b.time);
+      todaySamples = eigenSamples
+        .concat(bestaandeBridgeSamples)
+        .concat(nieuweMappedBridgeSamples)
+        .sort((a, b) => a.time - b.time);
       drawChart();
 
       // De live-uitlezing (#liveHeartRate, #contact) en de
@@ -3645,6 +3670,6 @@ window.addEventListener("load", () => {
   setTimeout(() => probeerBridgeBijOpstarten(0), BRIDGE_INIT_DELAYS_MS[0]);
 });
 </script>
-<script src="./features.js?v=2026.08.16-v42"></script>
+<script src="./features.js?v=2026.08.16-v43"></script>
 </body>
 </html>
