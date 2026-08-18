@@ -49,6 +49,13 @@ Heartbeat data from the Xiaomi Smart Band 10 can now be read by another Android 
   - **`hr_tail.py`** — Python script that reads the JSONL file into a SQLite database
   - **`hr_sync_server.py`** — Python script that syncs SQLite to the PWA's IndexedDB
 
+## Version 2026.08.19-v47
+
+- The v46 LNA permission button didn't resolve the issue — clicking it and manual "Sync met bridge" both still produced the same `NETWERK/CORS` failure. Real-world reports show Chrome's LNA rollout is still inconsistent outside desktop: some builds report permission state as `"prompt"` but never actually show the popup, or block silently in non-interactive contexts, without any visible indication to the user or page.
+- `checkLnaPermission()` now **always** logs the exact permission state (`"granted"` / `"denied"` / `"prompt"`, or "not supported") to the Log panel, unconditionally (not gated behind verbose logging) — this is diagnostic-critical and rare enough not to flood the log.
+- `checkBridgeAvailable()`'s catch block now re-runs `checkLnaPermission()` after every failed attempt, since the Permissions API's `change` event doesn't fire reliably on all Chrome builds.
+- Next diagnostic step if this still fails: check the exact logged permission state. If it's `"denied"`, the fix is in Chrome's site settings (tap the address bar's site info icon → Local network → Allow). If it's stuck on `"prompt"` with no popup ever appearing, this is a known mobile-Chrome LNA gap — the most reliable long-term fix is likely to sidestep the public HTTPS → private IP boundary entirely by serving the PWA itself from the bridge (`HrHttpServer.kt`'s `serveAsset()`/`STATIC_ASSETS`, already built for the Android TV workaround) so the page and bridge share the same private-network origin.
+
 ## Version 2026.08.19-v46
 
 - Root cause found for `TypeError: Failed to fetch` on the bridge health check even when `curl` succeeds and the `Access-Control-Allow-Private-Network` header is present: Chrome 142+ replaced the header-only Private Network Access (PNA) check with **Local Network Access (LNA)** — an actual permission prompt, like camera/location, gating any fetch from a public HTTPS origin (github.io) to a private IP. Without granted permission, the fetch fails silently regardless of server-side headers.

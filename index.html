@@ -318,7 +318,7 @@
     <div id="deviceName" class="status"></div>
     <div id="lastDeviceInfo" class="status"></div>
     <div id="wakeLockInfo" class="status">Screen wakelock: niet actief</div>
-    <div id="softwareVersionInfo" class="status">Softwareversie: 2026.08.19-v46</div>
+    <div id="softwareVersionInfo" class="status">Softwareversie: 2026.08.19-v47</div>
     <div id="updateInfo" class="update-line" role="status" aria-live="polite">
       <strong>Nieuwe softwareversie beschikbaar.</strong><br>
       Werk bij wanneer de hartslagmeting veilig onderbroken kan worden.<br>
@@ -442,7 +442,7 @@
 <script>
 "use strict";
 
-const SOFTWARE_VERSION = "2026.08.19-v46";
+const SOFTWARE_VERSION = "2026.08.19-v47";
 
 const HR_SERVICE = "0000180d-0000-1000-8000-00805f9b34fb";
 const HR_MEASUREMENT = "00002a37-0000-1000-8000-00805f9b34fb";
@@ -741,7 +741,7 @@ async function registerServiceWorker() {
   }
 
   try {
-    const registration = await navigator.serviceWorker.register("./sw.js?v=2026.08.19-v46", {
+    const registration = await navigator.serviceWorker.register("./sw.js?v=2026.08.19-v47", {
       scope: "./",
       updateViaCache: "none"
     });
@@ -3375,16 +3375,31 @@ async function bridgeFetch(url, opties, timeoutMs) {
 // automatische opstart-poging). We tonen daarom een expliciete knop i.p.v.
 // stil te blijven herhalen.
 async function checkLnaPermission() {
-  if (!navigator.permissions || !navigator.permissions.query) return null;
+  if (!navigator.permissions || !navigator.permissions.query) {
+    log("LNA-permissiecheck: navigator.permissions.query niet beschikbaar in deze browser");
+    return null;
+  }
   try {
     const status = await navigator.permissions.query({ name: "local-network-access" });
+    // Altijd loggen (niet achter de verbose-toggle) — dit is precies wat we
+    // nodig hebben om te zien of Chrome de permissie als "prompt", "denied"
+    // of "granted" beschouwt, zonder te hoeven gissen naar wat er achter de
+    // schermen gebeurt. Op Android/mobiele Chrome is de LNA-uitrol nog
+    // onvolledig; sommige builds rapporteren "prompt" maar tonen nooit
+    // daadwerkelijk een popup, of blokkeren zonder popup ("fail silently"
+    // in niet-interactieve contexten).
+    log("LNA-permissiestatus: " + status.state);
     updateLnaUi(status.state);
-    status.addEventListener("change", () => updateLnaUi(status.state));
+    status.addEventListener("change", () => {
+      log("LNA-permissiestatus gewijzigd naar: " + status.state);
+      updateLnaUi(status.state);
+    });
     return status.state;
   } catch (error) {
     // Deze Permissions-API-naam wordt niet (meer/nog) ondersteund door deze
     // browser(versie) — geen probleem, dan valt alles terug op de gewone
     // foutafhandeling in bridgeFetch()/checkBridgeAvailable() hierboven.
+    log("LNA-permissiecheck mislukt (naam niet ondersteund door deze browser): " + error);
     return null;
   }
 }
@@ -3437,6 +3452,12 @@ async function checkBridgeAvailable() {
     }
   } catch (error) {
     bridgeAvailable = false;
+    // Herchecken na een mislukte poging: op sommige (vooral mobiele) Chrome-
+    // builds vuurt het "change"-event van de Permissions-API niet altijd
+    // betrouwbaar, dus checken we hier expliciet opnieuw of de LNA-status
+    // inmiddels is gewijzigd (bv. de gebruiker heeft net de systeem-
+    // site-instellingen aangepast).
+    checkLnaPermission();
   }
   if (bridgeAvailable) {
     setBridgeInfo("Bridge: bereikbaar", "ok");
@@ -3836,6 +3857,6 @@ window.addEventListener("load", () => {
   setTimeout(() => probeerBridgeBijOpstarten(0), BRIDGE_INIT_DELAYS_MS[0]);
 });
 </script>
-<script src="./features.js?v=2026.08.19-v46"></script>
+<script src="./features.js?v=2026.08.19-v47"></script>
 </body>
 </html>
