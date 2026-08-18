@@ -318,7 +318,7 @@
     <div id="deviceName" class="status"></div>
     <div id="lastDeviceInfo" class="status"></div>
     <div id="wakeLockInfo" class="status">Screen wakelock: niet actief</div>
-    <div id="softwareVersionInfo" class="status">Softwareversie: 2026.08.19-v45</div>
+    <div id="softwareVersionInfo" class="status">Softwareversie: 2026.08.19-v46</div>
     <div id="updateInfo" class="update-line" role="status" aria-live="polite">
       <strong>Nieuwe softwareversie beschikbaar.</strong><br>
       Werk bij wanneer de hartslagmeting veilig onderbroken kan worden.<br>
@@ -330,6 +330,7 @@
     <div id="storageInfo" class="status">Opslag: controleren...</div>
     <div id="bridgeInfo" class="status">Bridge: niet gecontroleerd</div>
     <div id="bridgeOwnIp" class="status"></div>
+    <button id="bridgeLnaButton" class="orange" type="button" onclick="checkBridgeAvailable()" style="display:none;"></button>
     <label>
       Bridge-adres
       <input id="bridgeAddressInput" type="text" placeholder="127.0.0.1:8787" style="width:12em;" />
@@ -441,7 +442,7 @@
 <script>
 "use strict";
 
-const SOFTWARE_VERSION = "2026.08.19-v45";
+const SOFTWARE_VERSION = "2026.08.19-v46";
 
 const HR_SERVICE = "0000180d-0000-1000-8000-00805f9b34fb";
 const HR_MEASUREMENT = "00002a37-0000-1000-8000-00805f9b34fb";
@@ -740,7 +741,7 @@ async function registerServiceWorker() {
   }
 
   try {
-    const registration = await navigator.serviceWorker.register("./sw.js?v=2026.08.19-v45", {
+    const registration = await navigator.serviceWorker.register("./sw.js?v=2026.08.19-v46", {
       scope: "./",
       updateViaCache: "none"
     });
@@ -3364,6 +3365,53 @@ async function bridgeFetch(url, opties, timeoutMs) {
   }
 }
 
+// Chrome 142+ verving de header-only Private Network Access (PNA)-aanpak
+// door Local Network Access (LNA): een echt browser-permissieprompt (net
+// als camera/locatie), niet alleen de Access-Control-Allow-Private-Network-
+// header. curl kan de bridge dus prima bereiken (server + headers kloppen)
+// terwijl fetch() in de PWA toch faalt met TypeError, puur omdat de
+// gebruiker nog geen toestemming heeft gegeven — en de prompt zelf
+// verschijnt vermoedelijk alleen na een echte gebruikersklik (geen
+// automatische opstart-poging). We tonen daarom een expliciete knop i.p.v.
+// stil te blijven herhalen.
+async function checkLnaPermission() {
+  if (!navigator.permissions || !navigator.permissions.query) return null;
+  try {
+    const status = await navigator.permissions.query({ name: "local-network-access" });
+    updateLnaUi(status.state);
+    status.addEventListener("change", () => updateLnaUi(status.state));
+    return status.state;
+  } catch (error) {
+    // Deze Permissions-API-naam wordt niet (meer/nog) ondersteund door deze
+    // browser(versie) — geen probleem, dan valt alles terug op de gewone
+    // foutafhandeling in bridgeFetch()/checkBridgeAvailable() hierboven.
+    return null;
+  }
+}
+
+function updateLnaUi(state) {
+  const btn = document.getElementById("bridgeLnaButton");
+  if (!btn) return;
+  if (state === "denied") {
+    btn.style.display = "";
+    btn.textContent = "Lokale netwerktoegang geblokkeerd — tik voor site-instellingen";
+    btn.onclick = () => {
+      log("Lokale netwerktoegang staat op 'geblokkeerd'. Open het slotje/tune-icoontje naast de adresbalk en zet 'Lokaal netwerk' op 'Toestaan'.");
+    };
+  } else if (state === "prompt") {
+    btn.style.display = "";
+    btn.textContent = "Tik om lokale netwerktoegang toe te staan";
+    btn.onclick = () => checkBridgeAvailable();
+  } else {
+    // "granted" of onbekend: geen actie nodig, knop verbergen.
+    btn.style.display = "none";
+  }
+}
+
+window.addEventListener("load", () => {
+  checkLnaPermission();
+});
+
 async function checkBridgeAvailable() {
   let ownIp = null;
   try {
@@ -3788,6 +3836,6 @@ window.addEventListener("load", () => {
   setTimeout(() => probeerBridgeBijOpstarten(0), BRIDGE_INIT_DELAYS_MS[0]);
 });
 </script>
-<script src="./features.js?v=2026.08.19-v45"></script>
+<script src="./features.js?v=2026.08.19-v46"></script>
 </body>
 </html>

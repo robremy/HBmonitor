@@ -49,6 +49,12 @@ Heartbeat data from the Xiaomi Smart Band 10 can now be read by another Android 
   - **`hr_tail.py`** — Python script that reads the JSONL file into a SQLite database
   - **`hr_sync_server.py`** — Python script that syncs SQLite to the PWA's IndexedDB
 
+## Version 2026.08.19-v46
+
+- Root cause found for `TypeError: Failed to fetch` on the bridge health check even when `curl` succeeds and the `Access-Control-Allow-Private-Network` header is present: Chrome 142+ replaced the header-only Private Network Access (PNA) check with **Local Network Access (LNA)** — an actual permission prompt, like camera/location, gating any fetch from a public HTTPS origin (github.io) to a private IP. Without granted permission, the fetch fails silently regardless of server-side headers.
+- Added `checkLnaPermission()`, which queries `navigator.permissions.query({name: "local-network-access"})` on page load (with a `change` listener to react live) and feature-detects gracefully (older/unsupported browsers just fall through to existing error handling).
+- New `#bridgeLnaButton` shows automatically when permission is `"prompt"` ("Tik om lokale netwerktoegang toe te staan") — tapping it re-runs `checkBridgeAvailable()` as a genuine user gesture, which is likely required for Chrome to actually surface the LNA prompt (automatic startup-retry fetches with no click behind them may never trigger it). When permission is `"denied"`, the button instead points the user to the site's local-network permission setting.
+
 ## Version 2026.08.19-v45
 
 - Fixed the v44 bridge debug logging choking the page over a full day of auto-sync: every request/response line for every 30s cycle meant thousands of log lines accumulating in `#log`'s `textContent` with no cap, degrading and eventually freezing the tab.
