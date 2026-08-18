@@ -318,7 +318,7 @@
     <div id="deviceName" class="status"></div>
     <div id="lastDeviceInfo" class="status"></div>
     <div id="wakeLockInfo" class="status">Screen wakelock: niet actief</div>
-    <div id="softwareVersionInfo" class="status">Softwareversie: 2026.08.19-v47</div>
+    <div id="softwareVersionInfo" class="status">Softwareversie: 2026.08.16-v43</div>
     <div id="updateInfo" class="update-line" role="status" aria-live="polite">
       <strong>Nieuwe softwareversie beschikbaar.</strong><br>
       Werk bij wanneer de hartslagmeting veilig onderbroken kan worden.<br>
@@ -330,7 +330,6 @@
     <div id="storageInfo" class="status">Opslag: controleren...</div>
     <div id="bridgeInfo" class="status">Bridge: niet gecontroleerd</div>
     <div id="bridgeOwnIp" class="status"></div>
-    <button id="bridgeLnaButton" class="orange" type="button" onclick="checkBridgeAvailable()" style="display:none;"></button>
     <label>
       Bridge-adres
       <input id="bridgeAddressInput" type="text" placeholder="127.0.0.1:8787" style="width:12em;" />
@@ -339,10 +338,6 @@
     <button class="gray" type="button" onclick="herstelBridgeAdres()">Herstel naar 127.0.0.1</button>
     <button class="gray" type="button" onclick="syncMetBridgeKnop()">Sync met bridge</button>
     <button id="bridgeAutoSyncButton" class="green" type="button" onclick="toggleBridgeAutoSync()">Auto-verversen: aan</button>
-    <label>
-      <input id="bridgeVerboseLogInput" type="checkbox" onchange="toggleBridgeVerboseLog()" />
-      Uitgebreide bridge-logging (elk verzoek)
-    </label>
     <label>
       Sync elke
       <input id="bridgeAutoSyncSeconds" type="number" min="1" max="300" step="1" value="5" style="width:4em;" />
@@ -442,7 +437,7 @@
 <script>
 "use strict";
 
-const SOFTWARE_VERSION = "2026.08.19-v47";
+const SOFTWARE_VERSION = "2026.08.16-v43";
 
 const HR_SERVICE = "0000180d-0000-1000-8000-00805f9b34fb";
 const HR_MEASUREMENT = "00002a37-0000-1000-8000-00805f9b34fb";
@@ -582,16 +577,10 @@ function toLocalIsoString(date) {
     sign + offsetHours + ":" + offsetMins;
 }
 
-// Bovengrens voor het Log-paneel: zonder cap groeit element.textContent
-// onbeperkt door (elke dag opnieuw honderden/duizenden regels bij elke
-// auto-sync-cyclus), wat het DOM en de pagina uiteindelijk laat vastlopen
-// ("chokes") na een dag draaien. We bewaren alleen de laatste N regels.
-const LOG_MAX_REGELS = 200;
 function log(message) {
   const element = document.getElementById("log");
   const line = new Date().toLocaleTimeString() + " | " + message;
-  const regels = (line + "\n" + element.textContent).split("\n");
-  element.textContent = regels.slice(0, LOG_MAX_REGELS).join("\n");
+  element.textContent = line + "\n" + element.textContent;
 }
 
 function setStatus(message, className = "") {
@@ -741,7 +730,7 @@ async function registerServiceWorker() {
   }
 
   try {
-    const registration = await navigator.serviceWorker.register("./sw.js?v=2026.08.19-v47", {
+    const registration = await navigator.serviceWorker.register("./sw.js?v=2026.08.16-v43", {
       scope: "./",
       updateViaCache: "none"
     });
@@ -3291,146 +3280,10 @@ function bridgeTsToMs(ts) {
   return new Date(y, m - 1, d, hh, mm, ss || 0).getTime();
 }
 
-// Uitgebreide bridge-logging (elk verzoek, elke since-watermark, elk
-// antwoord) staat standaard UIT: bij auto-sync elke paar seconden liep het
-// Log-paneel binnen een dag vol met duizenden regels, wat de pagina liet
-// vastlopen. Standaard loggen we alleen FOUTEN en TRAGE verzoeken (>2s) —
-// dat is genoeg om een kapotte verbinding te diagnosticeren. Voor dieper
-// uitpluizen (bv. een watermark-bug) kan de checkbox "Uitgebreide
-// bridge-logging" tijdelijk aangezet worden.
-const BRIDGE_VERBOSE_LOG_KEY = "hbmonitor_bridge_verbose_log";
-let bridgeVerboseLog = false;
-try {
-  bridgeVerboseLog = localStorage.getItem(BRIDGE_VERBOSE_LOG_KEY) === "1";
-} catch (error) {
-  bridgeVerboseLog = false;
-}
-const BRIDGE_TRAAG_DREMPEL_MS = 2000;
-
-function toggleBridgeVerboseLog() {
-  const input = document.getElementById("bridgeVerboseLogInput");
-  bridgeVerboseLog = input ? input.checked : !bridgeVerboseLog;
-  try {
-    localStorage.setItem(BRIDGE_VERBOSE_LOG_KEY, bridgeVerboseLog ? "1" : "0");
-  } catch (error) {
-    // localStorage niet beschikbaar — voorkeur geldt dan alleen deze sessie.
-  }
-  log("Uitgebreide bridge-logging: " + (bridgeVerboseLog ? "aan" : "uit"));
-}
-
-window.addEventListener("DOMContentLoaded", () => {
-  const input = document.getElementById("bridgeVerboseLogInput");
-  if (input) input.checked = bridgeVerboseLog;
-});
-
-// Classificeert een fetch-fout in een kort, herkenbaar type zodat FOUT-regels
-// in het Log-paneel in één oogopslag te onderscheiden zijn (netwerk vs.
-// timeout vs. HTTP-statusfout vs. JSON-parsefout), i.p.v. steeds dezelfde
-// generieke "Failed to fetch" te loggen die zowel een dode server, een
-// PNA-headerprobleem als HTTPS-First-blokkade kan betekenen.
-function classificeerBridgeFout(error) {
-  if (error && error.name === "AbortError") return "TIMEOUT";
-  if (error instanceof TypeError) return "NETWERK/CORS"; // incl. PNA-header, mixed content, DNS, ECONNREFUSED
-  if (error && error.name === "SyntaxError") return "JSON-PARSE";
-  if (error && /^HTTP \d+/.test(String(error.message))) return "HTTP-STATUS";
-  return "ONBEKEND";
-}
-
-// Voert een bridge-fetch uit met timeout + gerichte debuglogging: URL,
-// duur en statuscode. Om te voorkomen dat het Log-paneel binnen een dag
-// volloopt (zie BRIDGE_VERBOSE_LOG hierboven), wordt een geslaagd, snel
-// verzoek NIET gelogd tenzij uitgebreide logging aanstaat; een fout of een
-// traag verzoek (>2s) wordt ALTIJD gelogd, ook met uitgebreide logging uit.
-async function bridgeFetch(url, opties, timeoutMs) {
-  const controller = new AbortController();
-  const timer = setTimeout(() => controller.abort(), timeoutMs || 6000);
-  const start = performance.now();
-  if (bridgeVerboseLog) log("Bridge-verzoek → " + url);
-  try {
-    const res = await fetch(url, Object.assign({}, opties, { signal: controller.signal }));
-    const duurMs = Math.round(performance.now() - start);
-    if (bridgeVerboseLog) {
-      log("Bridge-antwoord ← " + url + " status=" + res.status + " (" + duurMs + " ms)");
-    } else if (duurMs > BRIDGE_TRAAG_DREMPEL_MS) {
-      log("Bridge-verzoek TRAAG (" + duurMs + " ms) ← " + url + " status=" + res.status);
-    }
-    return res;
-  } catch (error) {
-    const duurMs = Math.round(performance.now() - start);
-    const type = classificeerBridgeFout(error);
-    log("Bridge-verzoek FOUT [" + type + "] → " + url + " na " + duurMs + " ms: " + error);
-    throw error;
-  } finally {
-    clearTimeout(timer);
-  }
-}
-
-// Chrome 142+ verving de header-only Private Network Access (PNA)-aanpak
-// door Local Network Access (LNA): een echt browser-permissieprompt (net
-// als camera/locatie), niet alleen de Access-Control-Allow-Private-Network-
-// header. curl kan de bridge dus prima bereiken (server + headers kloppen)
-// terwijl fetch() in de PWA toch faalt met TypeError, puur omdat de
-// gebruiker nog geen toestemming heeft gegeven — en de prompt zelf
-// verschijnt vermoedelijk alleen na een echte gebruikersklik (geen
-// automatische opstart-poging). We tonen daarom een expliciete knop i.p.v.
-// stil te blijven herhalen.
-async function checkLnaPermission() {
-  if (!navigator.permissions || !navigator.permissions.query) {
-    log("LNA-permissiecheck: navigator.permissions.query niet beschikbaar in deze browser");
-    return null;
-  }
-  try {
-    const status = await navigator.permissions.query({ name: "local-network-access" });
-    // Altijd loggen (niet achter de verbose-toggle) — dit is precies wat we
-    // nodig hebben om te zien of Chrome de permissie als "prompt", "denied"
-    // of "granted" beschouwt, zonder te hoeven gissen naar wat er achter de
-    // schermen gebeurt. Op Android/mobiele Chrome is de LNA-uitrol nog
-    // onvolledig; sommige builds rapporteren "prompt" maar tonen nooit
-    // daadwerkelijk een popup, of blokkeren zonder popup ("fail silently"
-    // in niet-interactieve contexten).
-    log("LNA-permissiestatus: " + status.state);
-    updateLnaUi(status.state);
-    status.addEventListener("change", () => {
-      log("LNA-permissiestatus gewijzigd naar: " + status.state);
-      updateLnaUi(status.state);
-    });
-    return status.state;
-  } catch (error) {
-    // Deze Permissions-API-naam wordt niet (meer/nog) ondersteund door deze
-    // browser(versie) — geen probleem, dan valt alles terug op de gewone
-    // foutafhandeling in bridgeFetch()/checkBridgeAvailable() hierboven.
-    log("LNA-permissiecheck mislukt (naam niet ondersteund door deze browser): " + error);
-    return null;
-  }
-}
-
-function updateLnaUi(state) {
-  const btn = document.getElementById("bridgeLnaButton");
-  if (!btn) return;
-  if (state === "denied") {
-    btn.style.display = "";
-    btn.textContent = "Lokale netwerktoegang geblokkeerd — tik voor site-instellingen";
-    btn.onclick = () => {
-      log("Lokale netwerktoegang staat op 'geblokkeerd'. Open het slotje/tune-icoontje naast de adresbalk en zet 'Lokaal netwerk' op 'Toestaan'.");
-    };
-  } else if (state === "prompt") {
-    btn.style.display = "";
-    btn.textContent = "Tik om lokale netwerktoegang toe te staan";
-    btn.onclick = () => checkBridgeAvailable();
-  } else {
-    // "granted" of onbekend: geen actie nodig, knop verbergen.
-    btn.style.display = "none";
-  }
-}
-
-window.addEventListener("load", () => {
-  checkLnaPermission();
-});
-
 async function checkBridgeAvailable() {
   let ownIp = null;
   try {
-    const res = await bridgeFetch(BRIDGE_URL + "/api/health", { cache: "no-store" });
+    const res = await fetch(BRIDGE_URL + "/api/health", { cache: "no-store" });
     bridgeAvailable = res.ok;
     if (res.ok) {
       // Optioneel veld: als hr_sync_server.py "ip" meestuurt in de
@@ -3441,23 +3294,13 @@ async function checkBridgeAvailable() {
       try {
         const data = await res.json();
         if (data && data.ip) ownIp = data.ip;
-        if (bridgeVerboseLog) log("Bridge-health OK: " + JSON.stringify(data));
       } catch (parseError) {
         // health-endpoint gaf geen (geldige) JSON terug — geen probleem,
         // bereikbaarheid staat al vast via res.ok.
-        if (bridgeVerboseLog) log("Bridge-health OK maar JSON-parse mislukt: " + parseError);
       }
-    } else {
-      log("Bridge-health non-OK status: " + res.status);
     }
   } catch (error) {
     bridgeAvailable = false;
-    // Herchecken na een mislukte poging: op sommige (vooral mobiele) Chrome-
-    // builds vuurt het "change"-event van de Permissions-API niet altijd
-    // betrouwbaar, dus checken we hier expliciet opnieuw of de LNA-status
-    // inmiddels is gewijzigd (bv. de gebruiker heeft net de systeem-
-    // site-instellingen aangepast).
-    checkLnaPermission();
   }
   if (bridgeAvailable) {
     setBridgeInfo("Bridge: bereikbaar", "ok");
@@ -3476,18 +3319,13 @@ async function fetchBridgeMetingen(dateKey, sinds) {
   if (sinds) {
     url += "&since=" + encodeURIComponent(sinds);
   }
-  if (bridgeVerboseLog) {
-    log("Sync-watermark voor " + dateKey + ": " + (sinds ? "since=" + sinds : "geen (volledige dag opgevraagd)"));
-  }
-  const res = await bridgeFetch(url, { cache: "no-store" });
+  const res = await fetch(url, { cache: "no-store" });
   if (!res.ok) throw new Error("HTTP " + res.status);
-  const data = await res.json();
-  if (bridgeVerboseLog) log("Bridge-metingen ontvangen: " + data.length + " voor " + dateKey);
-  return data;
+  return res.json();
 }
 
 async function fetchBridgeAnnotaties(dateKey) {
-  const res = await bridgeFetch(BRIDGE_URL + "/api/annotaties?date=" + encodeURIComponent(dateKey), { cache: "no-store" });
+  const res = await fetch(BRIDGE_URL + "/api/annotaties?date=" + encodeURIComponent(dateKey), { cache: "no-store" });
   if (!res.ok) throw new Error("HTTP " + res.status);
   return res.json();
 }
@@ -3546,21 +3384,6 @@ async function syncBridgeData(dateKey) {
   // hieronder, die als extra veiligheidsnet blijft staan).
   const laatsteTs = bridgeLaatstVerwerkteTs[dateKey] || 0;
   const sindsParam = laatsteTs > 0 ? bridgeIsoString(laatsteTs) : undefined;
-
-  // Gap-logging: als er sinds de vorige sync een groot tijdsgat is (bv. na
-  // een BLE-reconnect of een langere periode dat de PWA niet actief was),
-  // loggen we dat expliciet — dit gat is relevant omdat de eerste ~2 min.
-  // na een reconnect-gat van ≥3 min. transiënte artefacten kan bevatten.
-  if (laatsteTs > 0) {
-    const gapMs = Date.now() - laatsteTs;
-    if (gapMs >= 180000) {
-      // ≥3 min-gat loggen we altijd (relevant voor reconnect-settle-window),
-      // kortere gaten alleen bij uitgebreide logging.
-      log("Bridge-sync gat t.o.v. vorige cyclus: " + Math.round(gapMs / 1000) + " s (≥3 min — reconnect-settle-window van toepassing)");
-    } else if (bridgeVerboseLog && gapMs > 60000) {
-      log("Bridge-sync gat t.o.v. vorige cyclus: " + Math.round(gapMs / 1000) + " s");
-    }
-  }
 
   try {
     const [metingen, annotaties] = await Promise.all([
@@ -3830,10 +3653,6 @@ window.addEventListener("load", () => {
   const BRIDGE_INIT_DELAYS_MS = [1500, 3000, 5000, 8000, 13000];
 
   async function probeerBridgeBijOpstarten(poging) {
-    if (bridgeVerboseLog) {
-      log("Opstart-poging " + (poging + 1) + "/" + (BRIDGE_INIT_DELAYS_MS.length + 1) +
-        " om bridge te bereiken op " + BRIDGE_URL);
-    }
     const ok = await checkBridgeAvailable();
     if (ok) {
       await pushInstellingenNaarBridge();
@@ -3842,13 +3661,7 @@ window.addEventListener("load", () => {
       return;
     }
     if (poging < BRIDGE_INIT_DELAYS_MS.length) {
-      if (bridgeVerboseLog) {
-        log("Opstart-poging " + (poging + 1) + " mislukt, volgende poging over " +
-          BRIDGE_INIT_DELAYS_MS[poging] + " ms");
-      }
       setTimeout(() => probeerBridgeBijOpstarten(poging + 1), BRIDGE_INIT_DELAYS_MS[poging]);
-    } else {
-      log("Alle opstart-pogingen mislukt — bridge blijft 'niet bereikbaar' tot handmatige sync");
     }
     // Na de laatste poging blijft "Bridge: niet bereikbaar" staan; de
     // gebruiker kan nog altijd handmatig "Sync met bridge" gebruiken.
@@ -3857,6 +3670,6 @@ window.addEventListener("load", () => {
   setTimeout(() => probeerBridgeBijOpstarten(0), BRIDGE_INIT_DELAYS_MS[0]);
 });
 </script>
-<script src="./features.js?v=2026.08.19-v47"></script>
+<script src="./features.js?v=2026.08.16-v43"></script>
 </body>
 </html>
