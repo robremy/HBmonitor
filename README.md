@@ -49,6 +49,15 @@ Heartbeat data from the Xiaomi Smart Band 10 can now be read by another Android 
   - **`hr_tail.py`** — Python script that reads the JSONL file into a SQLite database
   - **`hr_sync_server.py`** — Python script that syncs SQLite to the PWA's IndexedDB
 
+## Version 2026.08.18-v44
+
+- Added detailed debug logging around every bridge connection (health check, `/api/metingen`, `/api/annotaties`). The Log panel previously showed only a bare "Bridge sync FOUT: TypeError: Failed to fetch" for every kind of failure — indistinguishable whether the cause was a dead server, a missing PNA header, HTTPS-First blocking, or a real timeout.
+- New `bridgeFetch()` wrapper logs the exact URL before each request, and on response logs the HTTP status and duration in ms. On failure it classifies the error into `NETWERK/CORS`, `TIMEOUT`, `HTTP-STATUS`, or `JSON-PARSE` via `classificeerBridgeFout()`, and now also enforces a 6s timeout via `AbortController` (previously fetches could hang indefinitely).
+- `fetchBridgeMetingen()` now logs the `since=` watermark used for each sync cycle (or its absence), and the number of measurements returned — needed to diagnose incremental-sync/watermark bugs.
+- `syncBridgeData()` now logs the gap since the previous sync watermark when it exceeds 60s, flagging gaps ≥3 min explicitly since the first ~2 min after such a gap can contain reconnect-settle-window artifacts.
+- Startup retry (`probeerBridgeBijOpstarten`) now logs each attempt number, the target URL, and the backoff delay before the next attempt, instead of failing silently until the final attempt.
+- Note: this intentionally changes the Log panel's previous "failures only" behavior for bridge calls — bridge requests now log on both success and failure, since diagnosing *why* a connection wasn't reached required seeing the successful/attempted calls too.
+
 ## Version 2026.08.15-v41
 
 - Fixed the chart/live-reading appearing to "lag" by tens of minutes in bridge mode after the screen was locked for a while. Chrome throttles `setInterval` timers in a backgrounded/inactive tab, so `bridgeAutoSyncTimer` (normally every few seconds) could go a long time without ticking. There was already a `visibilitychange` handler that force-reconnects direct Bluetooth on return to foreground, but no equivalent for bridge mode — the throttled sync timer just had to tick on its own eventually. Added a second `visibilitychange` listener that calls `syncBridgeIntoToday()` immediately when the tab becomes visible again, regardless of the timer's state.

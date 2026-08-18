@@ -318,7 +318,7 @@
     <div id="deviceName" class="status"></div>
     <div id="lastDeviceInfo" class="status"></div>
     <div id="wakeLockInfo" class="status">Screen wakelock: niet actief</div>
-    <div id="softwareVersionInfo" class="status">Softwareversie: 2026.08.16-v43</div>
+    <div id="softwareVersionInfo" class="status">Softwareversie: 2026.08.18-v44</div>
     <div id="updateInfo" class="update-line" role="status" aria-live="polite">
       <strong>Nieuwe softwareversie beschikbaar.</strong><br>
       Werk bij wanneer de hartslagmeting veilig onderbroken kan worden.<br>
@@ -437,7 +437,7 @@
 <script>
 "use strict";
 
-const SOFTWARE_VERSION = "2026.08.16-v43";
+const SOFTWARE_VERSION = "2026.08.18-v44";
 
 const HR_SERVICE = "0000180d-0000-1000-8000-00805f9b34fb";
 const HR_MEASUREMENT = "00002a37-0000-1000-8000-00805f9b34fb";
@@ -730,7 +730,7 @@ async function registerServiceWorker() {
   }
 
   try {
-    const registration = await navigator.serviceWorker.register("./sw.js?v=2026.08.16-v43", {
+    const registration = await navigator.serviceWorker.register("./sw.js?v=2026.08.18-v44", {
       scope: "./",
       updateViaCache: "none"
     });
@@ -3280,10 +3280,48 @@ function bridgeTsToMs(ts) {
   return new Date(y, m - 1, d, hh, mm, ss || 0).getTime();
 }
 
+// Classificeert een fetch-fout in een kort, herkenbaar type zodat FOUT-regels
+// in het Log-paneel in één oogopslag te onderscheiden zijn (netwerk vs.
+// timeout vs. HTTP-statusfout vs. JSON-parsefout), i.p.v. steeds dezelfde
+// generieke "Failed to fetch" te loggen die zowel een dode server, een
+// PNA-headerprobleem als HTTPS-First-blokkade kan betekenen.
+function classificeerBridgeFout(error) {
+  if (error && error.name === "AbortError") return "TIMEOUT";
+  if (error instanceof TypeError) return "NETWERK/CORS"; // incl. PNA-header, mixed content, DNS, ECONNREFUSED
+  if (error && error.name === "SyntaxError") return "JSON-PARSE";
+  if (error && /^HTTP \d+/.test(String(error.message))) return "HTTP-STATUS";
+  return "ONBEKEND";
+}
+
+// Voert een bridge-fetch uit met timeout + gedetailleerde debuglogging: URL,
+// pogingstijdstip, duur, statuscode en (bij fout) het foutentype. Wordt door
+// alle bridge-endpoints hieronder gebruikt zodat het Log-paneel niet meer
+// alleen "FOUT" toont maar ook context genoeg om te diagnosticeren zonder
+// eerst curl te hoeven draaien.
+async function bridgeFetch(url, opties, timeoutMs) {
+  const controller = new AbortController();
+  const timer = setTimeout(() => controller.abort(), timeoutMs || 6000);
+  const start = performance.now();
+  log("Bridge-verzoek → " + url);
+  try {
+    const res = await fetch(url, Object.assign({}, opties, { signal: controller.signal }));
+    const duurMs = Math.round(performance.now() - start);
+    log("Bridge-antwoord ← " + url + " status=" + res.status + " (" + duurMs + " ms)");
+    return res;
+  } catch (error) {
+    const duurMs = Math.round(performance.now() - start);
+    const type = classificeerBridgeFout(error);
+    log("Bridge-verzoek FOUT [" + type + "] → " + url + " na " + duurMs + " ms: " + error);
+    throw error;
+  } finally {
+    clearTimeout(timer);
+  }
+}
+
 async function checkBridgeAvailable() {
   let ownIp = null;
   try {
-    const res = await fetch(BRIDGE_URL + "/api/health", { cache: "no-store" });
+    const res = await bridgeFetch(BRIDGE_URL + "/api/health", { cache: "no-store" });
     bridgeAvailable = res.ok;
     if (res.ok) {
       // Optioneel veld: als hr_sync_server.py "ip" meestuurt in de
@@ -3294,10 +3332,14 @@ async function checkBridgeAvailable() {
       try {
         const data = await res.json();
         if (data && data.ip) ownIp = data.ip;
+        log("Bridge-health OK: " + JSON.stringify(data));
       } catch (parseError) {
         // health-endpoint gaf geen (geldige) JSON terug — geen probleem,
         // bereikbaarheid staat al vast via res.ok.
+        log("Bridge-health OK maar JSON-parse mislukt: " + parseError);
       }
+    } else {
+      log("Bridge-health non-OK status: " + res.status);
     }
   } catch (error) {
     bridgeAvailable = false;
@@ -3318,14 +3360,19 @@ async function fetchBridgeMetingen(dateKey, sinds) {
   let url = BRIDGE_URL + "/api/metingen?date=" + encodeURIComponent(dateKey);
   if (sinds) {
     url += "&since=" + encodeURIComponent(sinds);
+    log("Sync-watermark voor " + dateKey + ": since=" + sinds);
+  } else {
+    log("Sync-watermark voor " + dateKey + ": geen (volledige dag opgevraagd)");
   }
-  const res = await fetch(url, { cache: "no-store" });
+  const res = await bridgeFetch(url, { cache: "no-store" });
   if (!res.ok) throw new Error("HTTP " + res.status);
-  return res.json();
+  const data = await res.json();
+  log("Bridge-metingen ontvangen: " + data.length + " voor " + dateKey);
+  return data;
 }
 
 async function fetchBridgeAnnotaties(dateKey) {
-  const res = await fetch(BRIDGE_URL + "/api/annotaties?date=" + encodeURIComponent(dateKey), { cache: "no-store" });
+  const res = await bridgeFetch(BRIDGE_URL + "/api/annotaties?date=" + encodeURIComponent(dateKey), { cache: "no-store" });
   if (!res.ok) throw new Error("HTTP " + res.status);
   return res.json();
 }
@@ -3384,6 +3431,18 @@ async function syncBridgeData(dateKey) {
   // hieronder, die als extra veiligheidsnet blijft staan).
   const laatsteTs = bridgeLaatstVerwerkteTs[dateKey] || 0;
   const sindsParam = laatsteTs > 0 ? bridgeIsoString(laatsteTs) : undefined;
+
+  // Gap-logging: als er sinds de vorige sync een groot tijdsgat is (bv. na
+  // een BLE-reconnect of een langere periode dat de PWA niet actief was),
+  // loggen we dat expliciet — dit gat is relevant omdat de eerste ~2 min.
+  // na een reconnect-gat van ≥3 min. transiënte artefacten kan bevatten.
+  if (laatsteTs > 0) {
+    const gapMs = Date.now() - laatsteTs;
+    if (gapMs > 60000) {
+      log("Bridge-sync gat t.o.v. vorige cyclus: " + Math.round(gapMs / 1000) + " s" +
+        (gapMs >= 180000 ? " (≥3 min — reconnect-settle-window van toepassing)" : ""));
+    }
+  }
 
   try {
     const [metingen, annotaties] = await Promise.all([
@@ -3653,15 +3712,22 @@ window.addEventListener("load", () => {
   const BRIDGE_INIT_DELAYS_MS = [1500, 3000, 5000, 8000, 13000];
 
   async function probeerBridgeBijOpstarten(poging) {
+    log("Opstart-poging " + (poging + 1) + "/" + (BRIDGE_INIT_DELAYS_MS.length + 1) +
+      " om bridge te bereiken op " + BRIDGE_URL);
     const ok = await checkBridgeAvailable();
     if (ok) {
+      log("Opstart-poging " + (poging + 1) + ": bridge bereikbaar, instellingen pushen en syncen");
       await pushInstellingenNaarBridge();
       await syncBridgeIntoToday();
       if (bridgeAutoSyncEnabled) startBridgeAutoSync();
       return;
     }
     if (poging < BRIDGE_INIT_DELAYS_MS.length) {
+      log("Opstart-poging " + (poging + 1) + " mislukt, volgende poging over " +
+        BRIDGE_INIT_DELAYS_MS[poging] + " ms");
       setTimeout(() => probeerBridgeBijOpstarten(poging + 1), BRIDGE_INIT_DELAYS_MS[poging]);
+    } else {
+      log("Alle opstart-pogingen mislukt — bridge blijft 'niet bereikbaar' tot handmatige sync");
     }
     // Na de laatste poging blijft "Bridge: niet bereikbaar" staan; de
     // gebruiker kan nog altijd handmatig "Sync met bridge" gebruiken.
@@ -3670,6 +3736,6 @@ window.addEventListener("load", () => {
   setTimeout(() => probeerBridgeBijOpstarten(0), BRIDGE_INIT_DELAYS_MS[0]);
 });
 </script>
-<script src="./features.js?v=2026.08.16-v43"></script>
+<script src="./features.js?v=2026.08.18-v44"></script>
 </body>
 </html>
