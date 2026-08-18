@@ -49,6 +49,13 @@ Heartbeat data from the Xiaomi Smart Band 10 can now be read by another Android 
   - **`hr_tail.py`** — Python script that reads the JSONL file into a SQLite database
   - **`hr_sync_server.py`** — Python script that syncs SQLite to the PWA's IndexedDB
 
+## Version 2026.08.19-v45
+
+- Fixed the v44 bridge debug logging choking the page over a full day of auto-sync: every request/response line for every 30s cycle meant thousands of log lines accumulating in `#log`'s `textContent` with no cap, degrading and eventually freezing the tab.
+- `log()` now caps the panel at the last 200 lines instead of growing forever.
+- Bridge debug logging is now **off by default**. Only failures, the final exhausted-startup-retry message, and requests slower than 2s are logged unconditionally. Per-request URLs, `since=` watermarks, response counts, and startup-retry attempts are only logged when the new "Uitgebreide bridge-logging" checkbox (next to the bridge controls) is enabled — a `localStorage`-persisted opt-in for when you actually need to dig into a connection problem.
+- A gap of ≥3 minutes since the last sync watermark is still always logged (reconnect-settle-window relevance), independent of the verbose toggle.
+
 ## Version 2026.08.18-v44
 
 - Added detailed debug logging around every bridge connection (health check, `/api/metingen`, `/api/annotaties`). The Log panel previously showed only a bare "Bridge sync FOUT: TypeError: Failed to fetch" for every kind of failure — indistinguishable whether the cause was a dead server, a missing PNA header, HTTPS-First blocking, or a real timeout.

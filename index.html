@@ -318,7 +318,7 @@
     <div id="deviceName" class="status"></div>
     <div id="lastDeviceInfo" class="status"></div>
     <div id="wakeLockInfo" class="status">Screen wakelock: niet actief</div>
-    <div id="softwareVersionInfo" class="status">Softwareversie: 2026.08.18-v44</div>
+    <div id="softwareVersionInfo" class="status">Softwareversie: 2026.08.19-v45</div>
     <div id="updateInfo" class="update-line" role="status" aria-live="polite">
       <strong>Nieuwe softwareversie beschikbaar.</strong><br>
       Werk bij wanneer de hartslagmeting veilig onderbroken kan worden.<br>
@@ -338,6 +338,10 @@
     <button class="gray" type="button" onclick="herstelBridgeAdres()">Herstel naar 127.0.0.1</button>
     <button class="gray" type="button" onclick="syncMetBridgeKnop()">Sync met bridge</button>
     <button id="bridgeAutoSyncButton" class="green" type="button" onclick="toggleBridgeAutoSync()">Auto-verversen: aan</button>
+    <label>
+      <input id="bridgeVerboseLogInput" type="checkbox" onchange="toggleBridgeVerboseLog()" />
+      Uitgebreide bridge-logging (elk verzoek)
+    </label>
     <label>
       Sync elke
       <input id="bridgeAutoSyncSeconds" type="number" min="1" max="300" step="1" value="5" style="width:4em;" />
@@ -437,7 +441,7 @@
 <script>
 "use strict";
 
-const SOFTWARE_VERSION = "2026.08.18-v44";
+const SOFTWARE_VERSION = "2026.08.19-v45";
 
 const HR_SERVICE = "0000180d-0000-1000-8000-00805f9b34fb";
 const HR_MEASUREMENT = "00002a37-0000-1000-8000-00805f9b34fb";
@@ -577,10 +581,16 @@ function toLocalIsoString(date) {
     sign + offsetHours + ":" + offsetMins;
 }
 
+// Bovengrens voor het Log-paneel: zonder cap groeit element.textContent
+// onbeperkt door (elke dag opnieuw honderden/duizenden regels bij elke
+// auto-sync-cyclus), wat het DOM en de pagina uiteindelijk laat vastlopen
+// ("chokes") na een dag draaien. We bewaren alleen de laatste N regels.
+const LOG_MAX_REGELS = 200;
 function log(message) {
   const element = document.getElementById("log");
   const line = new Date().toLocaleTimeString() + " | " + message;
-  element.textContent = line + "\n" + element.textContent;
+  const regels = (line + "\n" + element.textContent).split("\n");
+  element.textContent = regels.slice(0, LOG_MAX_REGELS).join("\n");
 }
 
 function setStatus(message, className = "") {
@@ -730,7 +740,7 @@ async function registerServiceWorker() {
   }
 
   try {
-    const registration = await navigator.serviceWorker.register("./sw.js?v=2026.08.18-v44", {
+    const registration = await navigator.serviceWorker.register("./sw.js?v=2026.08.19-v45", {
       scope: "./",
       updateViaCache: "none"
     });
@@ -3280,6 +3290,38 @@ function bridgeTsToMs(ts) {
   return new Date(y, m - 1, d, hh, mm, ss || 0).getTime();
 }
 
+// Uitgebreide bridge-logging (elk verzoek, elke since-watermark, elk
+// antwoord) staat standaard UIT: bij auto-sync elke paar seconden liep het
+// Log-paneel binnen een dag vol met duizenden regels, wat de pagina liet
+// vastlopen. Standaard loggen we alleen FOUTEN en TRAGE verzoeken (>2s) —
+// dat is genoeg om een kapotte verbinding te diagnosticeren. Voor dieper
+// uitpluizen (bv. een watermark-bug) kan de checkbox "Uitgebreide
+// bridge-logging" tijdelijk aangezet worden.
+const BRIDGE_VERBOSE_LOG_KEY = "hbmonitor_bridge_verbose_log";
+let bridgeVerboseLog = false;
+try {
+  bridgeVerboseLog = localStorage.getItem(BRIDGE_VERBOSE_LOG_KEY) === "1";
+} catch (error) {
+  bridgeVerboseLog = false;
+}
+const BRIDGE_TRAAG_DREMPEL_MS = 2000;
+
+function toggleBridgeVerboseLog() {
+  const input = document.getElementById("bridgeVerboseLogInput");
+  bridgeVerboseLog = input ? input.checked : !bridgeVerboseLog;
+  try {
+    localStorage.setItem(BRIDGE_VERBOSE_LOG_KEY, bridgeVerboseLog ? "1" : "0");
+  } catch (error) {
+    // localStorage niet beschikbaar — voorkeur geldt dan alleen deze sessie.
+  }
+  log("Uitgebreide bridge-logging: " + (bridgeVerboseLog ? "aan" : "uit"));
+}
+
+window.addEventListener("DOMContentLoaded", () => {
+  const input = document.getElementById("bridgeVerboseLogInput");
+  if (input) input.checked = bridgeVerboseLog;
+});
+
 // Classificeert een fetch-fout in een kort, herkenbaar type zodat FOUT-regels
 // in het Log-paneel in één oogopslag te onderscheiden zijn (netwerk vs.
 // timeout vs. HTTP-statusfout vs. JSON-parsefout), i.p.v. steeds dezelfde
@@ -3293,20 +3335,24 @@ function classificeerBridgeFout(error) {
   return "ONBEKEND";
 }
 
-// Voert een bridge-fetch uit met timeout + gedetailleerde debuglogging: URL,
-// pogingstijdstip, duur, statuscode en (bij fout) het foutentype. Wordt door
-// alle bridge-endpoints hieronder gebruikt zodat het Log-paneel niet meer
-// alleen "FOUT" toont maar ook context genoeg om te diagnosticeren zonder
-// eerst curl te hoeven draaien.
+// Voert een bridge-fetch uit met timeout + gerichte debuglogging: URL,
+// duur en statuscode. Om te voorkomen dat het Log-paneel binnen een dag
+// volloopt (zie BRIDGE_VERBOSE_LOG hierboven), wordt een geslaagd, snel
+// verzoek NIET gelogd tenzij uitgebreide logging aanstaat; een fout of een
+// traag verzoek (>2s) wordt ALTIJD gelogd, ook met uitgebreide logging uit.
 async function bridgeFetch(url, opties, timeoutMs) {
   const controller = new AbortController();
   const timer = setTimeout(() => controller.abort(), timeoutMs || 6000);
   const start = performance.now();
-  log("Bridge-verzoek → " + url);
+  if (bridgeVerboseLog) log("Bridge-verzoek → " + url);
   try {
     const res = await fetch(url, Object.assign({}, opties, { signal: controller.signal }));
     const duurMs = Math.round(performance.now() - start);
-    log("Bridge-antwoord ← " + url + " status=" + res.status + " (" + duurMs + " ms)");
+    if (bridgeVerboseLog) {
+      log("Bridge-antwoord ← " + url + " status=" + res.status + " (" + duurMs + " ms)");
+    } else if (duurMs > BRIDGE_TRAAG_DREMPEL_MS) {
+      log("Bridge-verzoek TRAAG (" + duurMs + " ms) ← " + url + " status=" + res.status);
+    }
     return res;
   } catch (error) {
     const duurMs = Math.round(performance.now() - start);
@@ -3332,11 +3378,11 @@ async function checkBridgeAvailable() {
       try {
         const data = await res.json();
         if (data && data.ip) ownIp = data.ip;
-        log("Bridge-health OK: " + JSON.stringify(data));
+        if (bridgeVerboseLog) log("Bridge-health OK: " + JSON.stringify(data));
       } catch (parseError) {
         // health-endpoint gaf geen (geldige) JSON terug — geen probleem,
         // bereikbaarheid staat al vast via res.ok.
-        log("Bridge-health OK maar JSON-parse mislukt: " + parseError);
+        if (bridgeVerboseLog) log("Bridge-health OK maar JSON-parse mislukt: " + parseError);
       }
     } else {
       log("Bridge-health non-OK status: " + res.status);
@@ -3360,14 +3406,14 @@ async function fetchBridgeMetingen(dateKey, sinds) {
   let url = BRIDGE_URL + "/api/metingen?date=" + encodeURIComponent(dateKey);
   if (sinds) {
     url += "&since=" + encodeURIComponent(sinds);
-    log("Sync-watermark voor " + dateKey + ": since=" + sinds);
-  } else {
-    log("Sync-watermark voor " + dateKey + ": geen (volledige dag opgevraagd)");
+  }
+  if (bridgeVerboseLog) {
+    log("Sync-watermark voor " + dateKey + ": " + (sinds ? "since=" + sinds : "geen (volledige dag opgevraagd)"));
   }
   const res = await bridgeFetch(url, { cache: "no-store" });
   if (!res.ok) throw new Error("HTTP " + res.status);
   const data = await res.json();
-  log("Bridge-metingen ontvangen: " + data.length + " voor " + dateKey);
+  if (bridgeVerboseLog) log("Bridge-metingen ontvangen: " + data.length + " voor " + dateKey);
   return data;
 }
 
@@ -3438,9 +3484,12 @@ async function syncBridgeData(dateKey) {
   // na een reconnect-gat van ≥3 min. transiënte artefacten kan bevatten.
   if (laatsteTs > 0) {
     const gapMs = Date.now() - laatsteTs;
-    if (gapMs > 60000) {
-      log("Bridge-sync gat t.o.v. vorige cyclus: " + Math.round(gapMs / 1000) + " s" +
-        (gapMs >= 180000 ? " (≥3 min — reconnect-settle-window van toepassing)" : ""));
+    if (gapMs >= 180000) {
+      // ≥3 min-gat loggen we altijd (relevant voor reconnect-settle-window),
+      // kortere gaten alleen bij uitgebreide logging.
+      log("Bridge-sync gat t.o.v. vorige cyclus: " + Math.round(gapMs / 1000) + " s (≥3 min — reconnect-settle-window van toepassing)");
+    } else if (bridgeVerboseLog && gapMs > 60000) {
+      log("Bridge-sync gat t.o.v. vorige cyclus: " + Math.round(gapMs / 1000) + " s");
     }
   }
 
@@ -3712,19 +3761,22 @@ window.addEventListener("load", () => {
   const BRIDGE_INIT_DELAYS_MS = [1500, 3000, 5000, 8000, 13000];
 
   async function probeerBridgeBijOpstarten(poging) {
-    log("Opstart-poging " + (poging + 1) + "/" + (BRIDGE_INIT_DELAYS_MS.length + 1) +
-      " om bridge te bereiken op " + BRIDGE_URL);
+    if (bridgeVerboseLog) {
+      log("Opstart-poging " + (poging + 1) + "/" + (BRIDGE_INIT_DELAYS_MS.length + 1) +
+        " om bridge te bereiken op " + BRIDGE_URL);
+    }
     const ok = await checkBridgeAvailable();
     if (ok) {
-      log("Opstart-poging " + (poging + 1) + ": bridge bereikbaar, instellingen pushen en syncen");
       await pushInstellingenNaarBridge();
       await syncBridgeIntoToday();
       if (bridgeAutoSyncEnabled) startBridgeAutoSync();
       return;
     }
     if (poging < BRIDGE_INIT_DELAYS_MS.length) {
-      log("Opstart-poging " + (poging + 1) + " mislukt, volgende poging over " +
-        BRIDGE_INIT_DELAYS_MS[poging] + " ms");
+      if (bridgeVerboseLog) {
+        log("Opstart-poging " + (poging + 1) + " mislukt, volgende poging over " +
+          BRIDGE_INIT_DELAYS_MS[poging] + " ms");
+      }
       setTimeout(() => probeerBridgeBijOpstarten(poging + 1), BRIDGE_INIT_DELAYS_MS[poging]);
     } else {
       log("Alle opstart-pogingen mislukt — bridge blijft 'niet bereikbaar' tot handmatige sync");
@@ -3736,6 +3788,6 @@ window.addEventListener("load", () => {
   setTimeout(() => probeerBridgeBijOpstarten(0), BRIDGE_INIT_DELAYS_MS[0]);
 });
 </script>
-<script src="./features.js?v=2026.08.18-v44"></script>
+<script src="./features.js?v=2026.08.19-v45"></script>
 </body>
 </html>
