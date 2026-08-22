@@ -5,16 +5,16 @@
  * Gebruik in index.html dezelfde SOFTWARE_VERSION.
  */
 
-const APP_VERSION = "2026.08.21-v48";
+const APP_VERSION = "2026.08.22-v50";
 const CACHE_PREFIX = "heart-rate-alert-cache-";
 const CACHE_NAME = CACHE_PREFIX + APP_VERSION;
-const OFFLINE_PAGE = "./index.html?v=2026.08.21-v48";
+const OFFLINE_PAGE = "./index.html?v=2026.08.22-v50";
 
 const APP_FILES = [
   "./",
-  "./index.html?v=2026.08.21-v48",
-  "./features.js?v=2026.08.21-v48",
-  "./manifest.webmanifest?v=2026.08.21-v48",
+  "./index.html?v=2026.08.22-v50",
+  "./features.js?v=2026.08.22-v50",
+  "./manifest.webmanifest?v=2026.08.22-v50",
   "./icon-192.png",
   "./icon-512.png"
 ];
@@ -102,6 +102,21 @@ self.addEventListener("fetch", event => {
   const requestUrl = new URL(request.url);
 
   if (requestUrl.origin !== self.location.origin) {
+    return;
+  }
+
+  // /api/-verzoeken NOOIT via de cache serveren: sinds de PWA vanaf de
+  // bridge zelf draait (zelfde origin als de bridge-API, i.p.v. vroeger op
+  // GitHub Pages met de bridge op een ANDER origin dat deze fetch-handler
+  // toen automatisch oversloeg), viel /api/metingen en /api/annotaties
+  // ineens onder handleStaticRequest()'s stale-while-revalidate-cache. Dat
+  // gaf een concrete bug: de EERSTE respons voor een bepaalde dag-URL
+  // (bv. vroeg op de dag, toen er nog 0 metingen waren) bleef daarna voor
+  // altijd hangen als "het" antwoord — elke volgende aanroep kreeg diezelfde
+  // stale cache terug, ook al ververste de achtergrond-fetch de cache wel
+  // degelijk (de aanroeper zag dat verversde resultaat gewoon nooit). Deze
+  // endpoints zijn dynamisch en horen altijd live opgehaald te worden.
+  if (requestUrl.pathname.startsWith("/api/")) {
     return;
   }
 

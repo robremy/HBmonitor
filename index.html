@@ -318,7 +318,7 @@
     <div id="deviceName" class="status"></div>
     <div id="lastDeviceInfo" class="status"></div>
     <div id="wakeLockInfo" class="status">Screen wakelock: niet actief</div>
-    <div id="softwareVersionInfo" class="status">Softwareversie: 2026.08.21-v48</div>
+    <div id="softwareVersionInfo" class="status">Softwareversie: 2026.08.22-v50</div>
     <div id="updateInfo" class="update-line" role="status" aria-live="polite">
       <strong>Nieuwe softwareversie beschikbaar.</strong><br>
       Werk bij wanneer de hartslagmeting veilig onderbroken kan worden.<br>
@@ -442,7 +442,7 @@
 <script>
 "use strict";
 
-const SOFTWARE_VERSION = "2026.08.21-v48";
+const SOFTWARE_VERSION = "2026.08.22-v50";
 
 const HR_SERVICE = "0000180d-0000-1000-8000-00805f9b34fb";
 const HR_MEASUREMENT = "00002a37-0000-1000-8000-00805f9b34fb";
@@ -741,7 +741,7 @@ async function registerServiceWorker() {
   }
 
   try {
-    const registration = await navigator.serviceWorker.register("./sw.js?v=2026.08.21-v48", {
+    const registration = await navigator.serviceWorker.register("./sw.js?v=2026.08.22-v50", {
       scope: "./",
       updateViaCache: "none"
     });
@@ -1687,7 +1687,20 @@ document.addEventListener("visibilitychange", () => {
   if (document.visibilityState !== "visible") {
     return;
   }
-  if (typeof bridgeAvailable !== "undefined" && bridgeAvailable && typeof syncBridgeIntoToday === "function") {
+  if (typeof syncBridgeIntoToday !== "function") return;
+  // Niet vertrouwen op de bestaande bridgeAvailable-vlag: die kan tijdens
+  // de (door Chrome afgeknepen) achtergrondperiode zijn blijven hangen op
+  // "false" doordat één enkele periodieke check toevallig faalde terwijl
+  // het scherm uit stond — met als gevolg dat de geforceerde sync hieronder
+  // altijd werd overgeslagen totdat de gebruiker handmatig ververste (wat
+  // bridgeAvailable via de load-handler opnieuw vaststelt). Eerst dus altijd
+  // een verse checkBridgeAvailable(), en pas op basis dáárvan beslissen.
+  log("App weer actief; bridge-bereikbaarheid herchecken");
+  checkBridgeAvailable().then(beschikbaar => {
+    if (!beschikbaar) {
+      log("Bridge niet bereikbaar na terugkeer — auto-sync hervat zodra dat weer lukt");
+      return;
+    }
     log("App weer actief; bridge-sync geforceerd bijwerken");
     // Direct na het weer zichtbaar worden faalt fetch() hier soms een keer
     // met "Failed to fetch", ook richting 127.0.0.1 op hetzelfde toestel:
@@ -1704,7 +1717,13 @@ document.addEventListener("visibilitychange", () => {
         });
       }, 1200);
     });
-  }
+    // De onderliggende bridgeAutoSyncTimer (setInterval) kan door Chrome's
+    // achtergrond-throttling zijn vertraagd tot 1x/minuut of zelfs
+    // volledig gepauzeerd. Een simpele herstart met het ingestelde
+    // interval zorgt dat de reguliere cyclus weer normaal doortikt i.p.v.
+    // te vertrouwen op de afgeknepen timer die vanzelf bijtrekt.
+    if (bridgeAutoSyncEnabled) startBridgeAutoSync();
+  });
 });
 
 window.addEventListener("online", () => {
@@ -3864,6 +3883,6 @@ window.addEventListener("load", () => {
   setTimeout(() => probeerBridgeBijOpstarten(0), BRIDGE_INIT_DELAYS_MS[0]);
 });
 </script>
-<script src="./features.js?v=2026.08.21-v48"></script>
+<script src="./features.js?v=2026.08.22-v50"></script>
 </body>
 </html>

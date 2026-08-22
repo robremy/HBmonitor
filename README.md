@@ -49,6 +49,19 @@ Heartbeat data from the Xiaomi Smart Band 10 can now be read by another Android 
   - **`hr_tail.py`** — Python script that reads the JSONL file into a SQLite database
   - **`hr_sync_server.py`** — Python script that syncs SQLite to the PWA's IndexedDB
 
+## Version 2026.08.22-v50
+
+- Fixed: on a device using the bridge-hosted PWA (`https://<bridge-ip>:8787/`), `/api/metingen` and `/api/annotaties` calls returned `status=200` with a permanently stuck result (e.g. always "0 metingen") no matter how many fresh measurements the bridge actually had, confirmed via direct SQLite query on the bridge showing continuous fresh rows the whole time.
+- Root cause: `sw.js`'s fetch handler only skipped caching for cross-origin requests — which used to cover the bridge API automatically back when the PWA was served from GitHub Pages (a different origin than the LAN-IP bridge). Now that the PWA is served directly from the bridge itself, `/api/*` calls are same-origin and fell into `handleStaticRequest()`'s stale-while-revalidate cache: whichever response got cached first for a given day's URL (e.g. early in the day when there were 0 measurements yet) kept being served forever after — the background revalidation fetch did keep refreshing the cache, but the caller never actually saw that refreshed result.
+- `sw.js` now explicitly excludes any `/api/` path from service worker caching, regardless of origin — these are dynamic endpoints and must always be fetched live.
+- No separate cache-purge step needed: the existing `activate` handler already deletes all caches under the old version prefix on every version bump, so the already-poisoned cache entry is cleared automatically once this version is installed.
+
+## Version 2026.08.22-v49
+
+- Fixed: after ~10 minutes with the screen off, live bpm stopped updating in the browser even though the bridge itself kept receiving fresh measurements the whole time (confirmed via direct SQLite query) — only a manual page refresh brought it back.
+- Root cause: the existing `visibilitychange` recovery handler (added for the same class of bug on the direct-BLE path) gated its forced re-sync on the `bridgeAvailable` flag, which could be stuck at `false` from a single failed check during the throttled background period. Since nothing re-verified it before deciding whether to sync, the forced sync was silently skipped — only a full reload (which re-runs `checkBridgeAvailable()` on `load`) fixed it.
+- The handler now always calls `checkBridgeAvailable()` fresh on return-to-visible before deciding, and also explicitly restarts `bridgeAutoSyncTimer` (rather than relying on the throttled interval to catch up on its own).
+
 ## Version 2026.08.21-v48
 
 - Default `BRIDGE_URL` scheme changed from `http://` to `https://`, matching `hr_ble_bridge`'s new self-signed-TLS embedded server (see that repo's changelog). Explicit `http://`/`https://` prefixes typed into the Bridge-adres field are still respected as-is; only the auto-added default prefix changed.
