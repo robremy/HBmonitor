@@ -49,6 +49,41 @@ Heartbeat data from the Xiaomi Smart Band 10 can now be read by another Android 
   - **`hr_tail.py`** — Python script that reads the JSONL file into a SQLite database
   - **`hr_sync_server.py`** — Python script that syncs SQLite to the PWA's IndexedDB
 
+## Version 2026.08.21-v48
+
+- Default `BRIDGE_URL` scheme changed from `http://` to `https://`, matching `hr_ble_bridge`'s new self-signed-TLS embedded server (see that repo's changelog). Explicit `http://`/`https://` prefixes typed into the Bridge-adres field are still respected as-is; only the auto-added default prefix changed.
+- Context: a LAN-IP address only counts as a Chrome "secure context" over TLS, not plain HTTP (only `127.0.0.1`/`localhost` count as secure over plain HTTP) — needed for `navigator.storage.persist()`, the screen wake lock, and service worker registration to actually work on a second phone or an Android TV accessed via LAN IP, none of which worked previously under `http://192.168.1.x:8787`.
+- After updating the bridge app to the new HTTPS-enabled build, each device needs to visit the bridge URL once and click through the self-signed certificate warning — after that it's remembered per device.
+
+## Version 2026.08.19-v47
+
+- The v46 LNA permission button didn't resolve the issue — clicking it and manual "Sync met bridge" both still produced the same `NETWERK/CORS` failure. Real-world reports show Chrome's LNA rollout is still inconsistent outside desktop: some builds report permission state as `"prompt"` but never actually show the popup, or block silently in non-interactive contexts, without any visible indication to the user or page.
+- `checkLnaPermission()` now **always** logs the exact permission state (`"granted"` / `"denied"` / `"prompt"`, or "not supported") to the Log panel, unconditionally (not gated behind verbose logging) — this is diagnostic-critical and rare enough not to flood the log.
+- `checkBridgeAvailable()`'s catch block now re-runs `checkLnaPermission()` after every failed attempt, since the Permissions API's `change` event doesn't fire reliably on all Chrome builds.
+- Next diagnostic step if this still fails: check the exact logged permission state. If it's `"denied"`, the fix is in Chrome's site settings (tap the address bar's site info icon → Local network → Allow). If it's stuck on `"prompt"` with no popup ever appearing, this is a known mobile-Chrome LNA gap — the most reliable long-term fix is likely to sidestep the public HTTPS → private IP boundary entirely by serving the PWA itself from the bridge (`HrHttpServer.kt`'s `serveAsset()`/`STATIC_ASSETS`, already built for the Android TV workaround) so the page and bridge share the same private-network origin.
+
+## Version 2026.08.19-v46
+
+- Root cause found for `TypeError: Failed to fetch` on the bridge health check even when `curl` succeeds and the `Access-Control-Allow-Private-Network` header is present: Chrome 142+ replaced the header-only Private Network Access (PNA) check with **Local Network Access (LNA)** — an actual permission prompt, like camera/location, gating any fetch from a public HTTPS origin (github.io) to a private IP. Without granted permission, the fetch fails silently regardless of server-side headers.
+- Added `checkLnaPermission()`, which queries `navigator.permissions.query({name: "local-network-access"})` on page load (with a `change` listener to react live) and feature-detects gracefully (older/unsupported browsers just fall through to existing error handling).
+- New `#bridgeLnaButton` shows automatically when permission is `"prompt"` ("Tik om lokale netwerktoegang toe te staan") — tapping it re-runs `checkBridgeAvailable()` as a genuine user gesture, which is likely required for Chrome to actually surface the LNA prompt (automatic startup-retry fetches with no click behind them may never trigger it). When permission is `"denied"`, the button instead points the user to the site's local-network permission setting.
+
+## Version 2026.08.19-v45
+
+- Fixed the v44 bridge debug logging choking the page over a full day of auto-sync: every request/response line for every 30s cycle meant thousands of log lines accumulating in `#log`'s `textContent` with no cap, degrading and eventually freezing the tab.
+- `log()` now caps the panel at the last 200 lines instead of growing forever.
+- Bridge debug logging is now **off by default**. Only failures, the final exhausted-startup-retry message, and requests slower than 2s are logged unconditionally. Per-request URLs, `since=` watermarks, response counts, and startup-retry attempts are only logged when the new "Uitgebreide bridge-logging" checkbox (next to the bridge controls) is enabled — a `localStorage`-persisted opt-in for when you actually need to dig into a connection problem.
+- A gap of ≥3 minutes since the last sync watermark is still always logged (reconnect-settle-window relevance), independent of the verbose toggle.
+
+## Version 2026.08.18-v44
+
+- Added detailed debug logging around every bridge connection (health check, `/api/metingen`, `/api/annotaties`). The Log panel previously showed only a bare "Bridge sync FOUT: TypeError: Failed to fetch" for every kind of failure — indistinguishable whether the cause was a dead server, a missing PNA header, HTTPS-First blocking, or a real timeout.
+- New `bridgeFetch()` wrapper logs the exact URL before each request, and on response logs the HTTP status and duration in ms. On failure it classifies the error into `NETWERK/CORS`, `TIMEOUT`, `HTTP-STATUS`, or `JSON-PARSE` via `classificeerBridgeFout()`, and now also enforces a 6s timeout via `AbortController` (previously fetches could hang indefinitely).
+- `fetchBridgeMetingen()` now logs the `since=` watermark used for each sync cycle (or its absence), and the number of measurements returned — needed to diagnose incremental-sync/watermark bugs.
+- `syncBridgeData()` now logs the gap since the previous sync watermark when it exceeds 60s, flagging gaps ≥3 min explicitly since the first ~2 min after such a gap can contain reconnect-settle-window artifacts.
+- Startup retry (`probeerBridgeBijOpstarten`) now logs each attempt number, the target URL, and the backoff delay before the next attempt, instead of failing silently until the final attempt.
+- Note: this intentionally changes the Log panel's previous "failures only" behavior for bridge calls — bridge requests now log on both success and failure, since diagnosing *why* a connection wasn't reached required seeing the successful/attempted calls too.
+
 ## Version 2026.08.15-v41
 
 - Fixed the chart/live-reading appearing to "lag" by tens of minutes in bridge mode after the screen was locked for a while. Chrome throttles `setInterval` timers in a backgrounded/inactive tab, so `bridgeAutoSyncTimer` (normally every few seconds) could go a long time without ticking. There was already a `visibilitychange` handler that force-reconnects direct Bluetooth on return to foreground, but no equivalent for bridge mode — the throttled sync timer just had to tick on its own eventually. Added a second `visibilitychange` listener that calls `syncBridgeIntoToday()` immediately when the tab becomes visible again, regardless of the timer's state.
