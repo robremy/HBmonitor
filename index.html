@@ -318,7 +318,7 @@
     <div id="deviceName" class="status"></div>
     <div id="lastDeviceInfo" class="status"></div>
     <div id="wakeLockInfo" class="status">Screen wakelock: niet actief</div>
-    <div id="softwareVersionInfo" class="status">Softwareversie: 2026.08.24-v51</div>
+    <div id="softwareVersionInfo" class="status">Softwareversie: 2026.08.24-v52</div>
     <div id="updateInfo" class="update-line" role="status" aria-live="polite">
       <strong>Nieuwe softwareversie beschikbaar.</strong><br>
       Werk bij wanneer de hartslagmeting veilig onderbroken kan worden.<br>
@@ -338,6 +338,7 @@
     <button class="gray" type="button" onclick="slaBridgeAdresOp()">Bridge-adres opslaan</button>
     <button class="gray" type="button" onclick="herstelBridgeAdres()">Herstel naar 127.0.0.1</button>
     <button class="gray" type="button" onclick="syncMetBridgeKnop()">Sync met bridge</button>
+    <button class="gray" type="button" onclick="voerVolledigeResyncUit()" title="Haalt metingen én annotaties voor de zichtbare 4 dagen volledig opnieuw op van de bridge — nodig als een annotatie op een oudere meting niet lijkt door te komen.">Volledige resync</button>
     <button id="bridgeAutoSyncButton" class="green" type="button" onclick="toggleBridgeAutoSync()">Auto-verversen: aan</button>
     <label>
       <input id="bridgeVerboseLogInput" type="checkbox" onchange="toggleBridgeVerboseLog()" />
@@ -442,7 +443,7 @@
 <script>
 "use strict";
 
-const SOFTWARE_VERSION = "2026.08.24-v51";
+const SOFTWARE_VERSION = "2026.08.24-v52";
 
 const HR_SERVICE = "0000180d-0000-1000-8000-00805f9b34fb";
 const HR_MEASUREMENT = "00002a37-0000-1000-8000-00805f9b34fb";
@@ -741,7 +742,7 @@ async function registerServiceWorker() {
   }
 
   try {
-    const registration = await navigator.serviceWorker.register("./sw.js?v=2026.08.24-v51", {
+    const registration = await navigator.serviceWorker.register("./sw.js?v=2026.08.24-v52", {
       scope: "./",
       updateViaCache: "none"
     });
@@ -3902,6 +3903,6 @@ window.addEventListener("load", () => {
   setTimeout(() => probeerBridgeBijOpstarten(0), BRIDGE_INIT_DELAYS_MS[0]);
 });
 </script>
-<script src="./features.js?v=2026.08.24-v51"></script>
+<script src="./features.js?v=2026.08.24-v52"></script>
 </body>
 </html>

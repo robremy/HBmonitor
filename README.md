@@ -49,6 +49,11 @@ Heartbeat data from the Xiaomi Smart Band 10 can now be read by another Android 
   - **`hr_tail.py`** — Python script that reads the JSONL file into a SQLite database
   - **`hr_sync_server.py`** — Python script that syncs SQLite to the PWA's IndexedDB
 
+## Version 2026.08.24-v52
+
+- Added: "Volledige resync" button next to "Sync met bridge". Regular sync only writes the "new" slice of each day to IndexedDB (per-day watermark in `bridgeLaatstVerwerkteTs`), so an annotation set afterward on an already-synced older measurement was computed in memory but never persisted — it only reappeared after a full page reload (see v51's annotation single-source-of-truth fix, which made this gap more visible).
+- "Volledige resync" clears the watermark for the currently-viewed 4-day window (anchored on `selectedDateKey`, so it resyncs whatever days you're actually looking at, not necessarily today) and then calls the existing `loadRecentDayCharts()`, which re-runs `syncBridgeData()` per day. With the watermark cleared, each day is treated as fully new again, so `saveSamplesIndexedDb()`'s `put()` (deduplicated by id) overwrites existing IndexedDB records with the current bridge content — including annotations added after the fact. Nothing is deleted from IndexedDB; own direct Web Bluetooth measurements are untouched, since they don't use the bridge watermark at all.
+
 ## Version 2026.08.24-v51
 
 - Fixed: annotations created or moved on a device's own (IndexedDB) measurements were not reliably reaching the bridge, so the bridge database could silently diverge from what the PWA showed.

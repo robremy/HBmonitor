@@ -1,6 +1,6 @@
 /*
  * Heart Rate Alert gegevensbeheer en historische grafieken
- * Versie: 2026.08.24-v51
+ * Versie: 2026.08.24-v52
  *
  * Functies:
  * - Export van alle opgeslagen dagen naar één CSV-bestand
@@ -11,7 +11,7 @@
 "use strict";
 
 (() => {
-  const FEATURE_VERSION = "2026.08.24-v51";
+  const FEATURE_VERSION = "2026.08.24-v52";
   const CSV_HEADERS = [
     "id",
     "ts_ms",
@@ -256,6 +256,52 @@
     if (returnBtn) returnBtn.style.display = "none";
 
     await loadRecentDayCharts();
+  };
+
+  // "Sync met bridge" haalt alleen het NIEUWE stuk van elke dag op (via de
+  // per-dag watermark in bridgeLaatstVerwerkteTs, zie syncBridgeData in
+  // index.html). Dat betekent dat een annotatie die achteraf op een al
+  // eerder gesynchroniseerde (oudere) meting wordt gezet, nooit naar
+  // IndexedDB wordt weggeschreven totdat er iets de watermark reset — tot nu
+  // toe alleen een volledige paginaherlaad. "Volledige resync" doet dat
+  // bewust: watermark wissen voor de zichtbare 4 dagen (geankerd op
+  // selectedDateKey, dus de dagen die de gebruiker nu daadwerkelijk bekijkt)
+  // en daarna gewoon loadRecentDayCharts() aanroepen — die roept
+  // syncBridgeData() per dag opnieuw aan, en omdat de watermark nu leeg is
+  // behandelt die de HELE dag weer als "nieuw". put() in saveSamplesIndexedDb()
+  // dedupliceert op id, dus dit overschrijft bestaande records met de
+  // actuele bridge-inhoud in plaats van ze te verdubbelen. Eigen
+  // rechtstreekse (Web Bluetooth) metingen staan los van de bridge-watermark
+  // en blijven dus gewoon ongewijzigd staan.
+  window.voerVolledigeResyncUit = async function voerVolledigeResyncUit() {
+    if (!confirm(
+      "Volledige resync: metingen én annotaties voor de zichtbare 4 dagen worden opnieuw volledig opgehaald van de bridge. " +
+      "Eigen rechtstreekse (Web Bluetooth) metingen blijven ongewijzigd. Dit kan even duren bij drukke dagen. Doorgaan?"
+    )) {
+      return;
+    }
+
+    await waitForIndexedDb();
+
+    const dagen = [];
+    for (let daysAgo = 0; daysAgo < RECENT_DAY_COUNT; daysAgo += 1) {
+      dagen.push(dateKeyDaysAgo(daysAgo));
+    }
+
+    for (const dateKey of dagen) {
+      delete bridgeLaatstVerwerkteTs[dateKey];
+    }
+    if (typeof bewaarBridgeWatermarks === "function") {
+      bewaarBridgeWatermarks();
+    }
+
+    log("Volledige resync gestart voor: " + dagen.join(", "));
+    try {
+      await loadRecentDayCharts();
+      log("Volledige resync voltooid.");
+    } catch (error) {
+      log("Volledige resync FOUT: " + error);
+    }
   };
 
   const loadRecentDayCharts = window.loadRecentDayCharts = async function loadRecentDayCharts() {
