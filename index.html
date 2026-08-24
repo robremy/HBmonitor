@@ -318,7 +318,7 @@
     <div id="deviceName" class="status"></div>
     <div id="lastDeviceInfo" class="status"></div>
     <div id="wakeLockInfo" class="status">Screen wakelock: niet actief</div>
-    <div id="softwareVersionInfo" class="status">Softwareversie: 2026.08.22-v50</div>
+    <div id="softwareVersionInfo" class="status">Softwareversie: 2026.08.24-v51</div>
     <div id="updateInfo" class="update-line" role="status" aria-live="polite">
       <strong>Nieuwe softwareversie beschikbaar.</strong><br>
       Werk bij wanneer de hartslagmeting veilig onderbroken kan worden.<br>
@@ -442,7 +442,7 @@
 <script>
 "use strict";
 
-const SOFTWARE_VERSION = "2026.08.22-v50";
+const SOFTWARE_VERSION = "2026.08.24-v51";
 
 const HR_SERVICE = "0000180d-0000-1000-8000-00805f9b34fb";
 const HR_MEASUREMENT = "00002a37-0000-1000-8000-00805f9b34fb";
@@ -741,7 +741,7 @@ async function registerServiceWorker() {
   }
 
   try {
-    const registration = await navigator.serviceWorker.register("./sw.js?v=2026.08.22-v50", {
+    const registration = await navigator.serviceWorker.register("./sw.js?v=2026.08.24-v51", {
       scope: "./",
       updateViaCache: "none"
     });
@@ -2727,10 +2727,21 @@ function updateMovedAnnotationInMemory(sourceId, targetId, annotation) {
 }
 
 async function writeAnnotationForSample(sample, annotation) {
-  if (sample.source === "bridge") {
-    await postAnnotationToBridge(sample, annotation);
-  } else {
-    await saveAnnotationIndexedDb(sample.id, annotation);
+  // De bridge is de single source of truth voor annotaties: elke schrijf-
+  // actie (aanmaken, bewerken, verplaatsen) moet daar slagen, ongeacht of
+  // het punt zelf uit de bridge-database of uit IndexedDB komt. IndexedDB
+  // dient alleen nog als lokale spiegel/cache voor eigen metingen, niet als
+  // vervangende opslag als de bridge onbereikbaar is.
+  await postAnnotationToBridge(sample, annotation);
+  if (sample.source !== "bridge") {
+    try {
+      await saveAnnotationIndexedDb(sample.id, annotation);
+    } catch (error) {
+      // De bridge-schrijfactie is al gelukt (dat is de bron van waarheid);
+      // een falende lokale spiegel mag dat succes niet ongedaan maken, dus
+      // hier alleen loggen.
+      log("Lokale IndexedDB-spiegel bijwerken mislukt: " + error);
+    }
   }
 }
 
@@ -2832,15 +2843,23 @@ async function commitAnnotation() {
       sample.annotation = annotation;
       setDbInfo("Info opgeslagen (bridge)", "ok");
     } else {
-      await saveAnnotationIndexedDb(sample.id, annotation);
+      // De bridge is de single source of truth: schrijf daar eerst naartoe
+      // (verplicht, niet best-effort) en werk IndexedDB pas daarna bij als
+      // lokale spiegel. Zo kan een annotatie nooit lokaal "opgeslagen"
+      // lijken terwijl de bridge-database iets anders bevat.
+      const bereikbaar = await checkBridgeAvailable();
+      if (!bereikbaar) {
+        throw new Error("Bridge niet bereikbaar — is hr_sync_server.py nog actief in Termux?");
+      }
+      await postAnnotationToBridge(sample, annotation);
+      try {
+        await saveAnnotationIndexedDb(sample.id, annotation);
+      } catch (error) {
+        log("Lokale IndexedDB-spiegel bijwerken mislukt: " + error);
+      }
       sample.annotation = annotation;
       updateAnnotationInMemory(sample.id, annotation);
-      postAnnotationToBridge(sample, annotation).catch(error => {
-        // Best-effort: bridge-sync is een aanvulling, geen vereiste voor
-        // eigen (IndexedDB) metingen — dus hier alleen loggen, niet falen.
-        log("Annotatie naar bridge sturen mislukt: " + error);
-      });
-      setDbInfo("Info opgeslagen", "ok");
+      setDbInfo("Info opgeslagen (bridge)", "ok");
     }
     if (pendingAnnotationRedraw) pendingAnnotationRedraw();
     if (dialog && dialog.open) dialog.close();
@@ -3883,6 +3902,6 @@ window.addEventListener("load", () => {
   setTimeout(() => probeerBridgeBijOpstarten(0), BRIDGE_INIT_DELAYS_MS[0]);
 });
 </script>
-<script src="./features.js?v=2026.08.22-v50"></script>
+<script src="./features.js?v=2026.08.24-v51"></script>
 </body>
 </html>

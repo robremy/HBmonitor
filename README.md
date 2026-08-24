@@ -49,6 +49,13 @@ Heartbeat data from the Xiaomi Smart Band 10 can now be read by another Android 
   - **`hr_tail.py`** — Python script that reads the JSONL file into a SQLite database
   - **`hr_sync_server.py`** — Python script that syncs SQLite to the PWA's IndexedDB
 
+## Version 2026.08.24-v51
+
+- Fixed: annotations created or moved on a device's own (IndexedDB) measurements were not reliably reaching the bridge, so the bridge database could silently diverge from what the PWA showed.
+- Root cause 1 (moves): `writeAnnotationForSample()` only posted to the bridge when the sample's `source` was `"bridge"`; for own IndexedDB samples it wrote to IndexedDB only and never touched the bridge at all — so dragging/moving an annotation on a locally-recorded point never synced.
+- Root cause 2 (create/edit): `commitAnnotation()` saved own-sample annotations to IndexedDB first and pushed to the bridge only as a fire-and-forget best-effort call whose failures were silently logged, not surfaced — so a bridge outage or write failure looked identical to success in the UI.
+- The bridge is now treated as the single source of truth for annotations: `writeAnnotationForSample()` always posts to the bridge first (required, not best-effort) for both create/edit and move operations, regardless of sample source; IndexedDB is updated afterward purely as a local mirror/cache. If the bridge write fails, the whole operation now fails visibly (dialog error / move-error status) instead of appearing to succeed locally.
+
 ## Version 2026.08.22-v50
 
 - Fixed: on a device using the bridge-hosted PWA (`https://<bridge-ip>:8787/`), `/api/metingen` and `/api/annotaties` calls returned `status=200` with a permanently stuck result (e.g. always "0 metingen") no matter how many fresh measurements the bridge actually had, confirmed via direct SQLite query on the bridge showing continuous fresh rows the whole time.
